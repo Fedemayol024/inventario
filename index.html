@@ -133,10 +133,18 @@
 <script>
 (function () {
   'use strict';
-  var API = (window.INVENTARIO_API_URL || '').trim();
   var $ = function (id) { return document.getElementById(id); };
   function leer(k, def) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
   function guardar(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  /* La dirección de la planilla no va publicada con la app: llega una sola vez en el
+     link de instalación (…/#c=CODIGO) y queda guardada en el teléfono. */
+  var mc = /[#&]c=([\w-]{20,})/.exec(location.hash);
+  if (mc) {
+    guardar('inv.api', 'https://script.google.com/macros/s/' + mc[1] + '/exec');
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
+  var API = (window.INVENTARIO_API_URL || '').trim() || leer('inv.api', '');
 
   var quien = leer('inv.quien', '');
   var chat = leer('inv.chat', []);
@@ -419,7 +427,11 @@
   $('btn-quien').addEventListener('click', pedirQuien);
 
   /* ----- inicio ----- */
-  if (!API) { $('aviso').hidden = false; $('aviso').textContent = 'Modo de prueba: los datos se guardan solo en este dispositivo.'; }
+  if (!API) {
+    $('aviso').hidden = false;
+    $('aviso').textContent = location.protocol === 'https:' ? 'Falta conectar con la planilla: abrí el link de instalación que te pasaron. Mientras tanto, lo que anotes queda solo en este teléfono.'
+      : 'Modo de prueba: los datos se guardan solo en este dispositivo.';
+  }
   chat.forEach(pintarMsg);
   pintarInv();
   if (quien) $('btn-quien').textContent = quien; else pedirQuien();

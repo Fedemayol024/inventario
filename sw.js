@@ -1,5 +1,5 @@
 /* Permite instalar la app y abrirla aunque no haya conexión. */
-const CACHE = 'inventario-v3';
+const CACHE = 'inventario-v4';
 const ARCHIVOS = ['./', 'index.html', 'core.js', 'config.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARCHIVOS))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
