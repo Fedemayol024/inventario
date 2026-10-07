@@ -218,7 +218,27 @@ var Core = (function () {
     if (/^(deshacer|deshace|borra(r)? (lo )?ultimo|me equivoque|anular|cancelar)\b/.test(nt)) return { tipo: 'deshacer' };
     if (/^(lista|inventario|ver (todo|inventario|la lista|lista)|mostrar (todo|inventario)|que (hay|tenemos|queda))$/.test(nt)) return { tipo: 'lista' };
     if (/^(que (vence|vencio|se vence|se vencio|esta (por vencer|vencido)|hay (por vencer|vencido))|vencimientos?|por vencer|vencidos)/.test(nt)) return { tipo: 'vencen' };
-    if (/^(que (falta|se termino|hay que comprar|no hay)|faltantes|lista de compras)/.test(nt)) return { tipo: 'faltantes' };
+    if (/^(que (falta|se termino|hay que comprar|no hay|compro|compramos|tengo que comprar|tenemos que comprar|queda poco)|faltantes|lista de compras|para comprar)/.test(nt)) return { tipo: 'faltantes' };
+
+    // avisos de poca cantidad ("mínimo de azúcar 10 kg") y productos que nunca vencen
+    function nombreDe(ts) { ts = ts.slice(); while (ts.length && ARTIC[ts[0].n]) ts.shift(); return ts.length ? mayus(ts.map(function (x) { return x.o; }).join(' ')) : ''; }
+    function cfg(o) { return { tipo: 'mov', items: [o] }; }
+    if ((m = /^(?:sin|quitar|sacar|borrar|eliminar) (?:el )?(?:minimo|aviso) (?:de |del |a |al |para )?(.+)$/.exec(nt))) {
+      var ns = nombreDe(quitarPrefijo(toks, nt, m[1]));
+      if (ns) return cfg({ tipo: 'cfg', producto: ns, min: null });
+    }
+    if ((m = /^(?:el )?minimo (?:de |del |para )?(.+)$/.exec(nt)) ||
+        (m = /^avisa(?:me|nos|r)? (?:cuando|si) (?:quede|queden|haya|hay) (?:menos de |poco |poca |pocos |pocas )?(.+)$/.exec(nt))) {
+      var im = leerItem(quitarPrefijo(toks, nt, m[1]));
+      if (im && !im.implicita && im.cantidad > 0) return cfg({ tipo: 'cfg', producto: im.producto, min: im.cantidad, unidad: im.unidad });
+      return { tipo: 'nose', pista: 'minimo' };
+    }
+    if (!toks.some(function (t) { return ENT[t.n] || SAL[t.n]; }) && !esCant(toks[0])) {
+      if ((m = /^(.+?) (?:nunca vencen?|no vencen? nunca|no vencen?|no tienen? vencimiento)$/.exec(nt)) && nombreDe(toks.slice(0, m[1].split(' ').length)))
+        return cfg({ tipo: 'cfg', producto: nombreDe(toks.slice(0, m[1].split(' ').length)), nv: true });
+      if ((m = /^(.+?) (?:si vencen?|si tienen? vencimiento|tienen? vencimiento)$/.exec(nt)) && nombreDe(toks.slice(0, m[1].split(' ').length)))
+        return cfg({ tipo: 'cfg', producto: nombreDe(toks.slice(0, m[1].split(' ').length)), nv: false });
+    }
 
     if ((m = /^(?:borrar|eliminar|quitar del inventario) (.+)$/.exec(nt))) {
       var pb = quitarPrefijo(toks, nt, m[1]);
@@ -380,12 +400,34 @@ var Core = (function () {
      { pregunta: 'venc' }  → si tiene fecha de vencimiento
      { pregunta: 'lote', opciones: [lotes] } → de cuál fecha es el que saca
      {} → nada, se puede guardar */
-  function preparar(inv, it) {
+  /* Ajustes por producto: cfg = [{ producto, min, nv }]  (min = avisar cuando quede eso o menos; nv = nunca vence) */
+  function cfgDe(cfg, nombre) {
+    var k = clave(nombre), i;
+    for (i = 0; cfg && i < cfg.length; i++) if (clave(cfg[i].producto) === k) return cfg[i];
+    return null;
+  }
+  /* Lista de compras: { sin: [productos en cero], poco: [{ p: producto, min: mínimo }] } */
+  function faltantes(inv, cfg) {
+    var sin = [], poco = [];
+    productos(inv).forEach(function (p) {
+      var c = cfgDe(cfg, p.producto);
+      if (p.total === 0) sin.push(p);
+      else if (c && c.min > 0 && p.total <= c.min) poco.push({ p: p, min: c.min });
+    });
+    return { sin: sin, poco: poco };
+  }
+
+  function preparar(inv, it, cfg) {
     var b = buscar(inv, it.producto), entra = it.tipo === 'entrada' || (it.tipo === 'ajuste' && it.cantidad > 0);
     if (!it.nuevo) {
       if (b.amb) return { pregunta: 'cual', opciones: b.amb, nuevo: entra };
       if (b.p && !b.exacto && entra) return { pregunta: 'parecido', opciones: [b.p.producto], nuevo: true };
       if (!b.p) { var sim = parecidos(inv, it.producto); if (sim.length) return { pregunta: 'parecido', opciones: sim, nuevo: entra }; }
+    }
+    if (it.tipo === 'cfg') return {};
+    if (it.venc === undefined && entra && (!b.p || vivos(b.p).length === 0 || it.tipo === 'entrada')) {
+      var c = cfgDe(cfg, b.p && !(it.nuevo && !b.exacto) ? b.p.producto : it.producto);
+      if (c && c.nv) it.venc = '';                      // nunca vence: no hace falta preguntar
     }
     if (it.tipo === 'entrada') return it.venc === undefined ? { pregunta: 'venc' } : {};
     if (it.tipo !== 'salida' && !(it.tipo === 'ajuste' && it.cantidad > 0)) return {};
@@ -547,10 +589,33 @@ var Core = (function () {
       if (!movs.length) return { resp: { ok: true, res: [{ ok: false, msg: 'No hay nada para deshacer.' }], inv: inv }, movs: [], cambio: false };
       return { resp: { ok: true, res: [{ ok: true, msg: 'Listo, deshice lo último: ' + partes.join(', ') + '.' }], inv: inv }, movs: movs, cambio: true };
     }
+    if (req.a === 'cfg') {
+      var cf = estado.cfg || (estado.cfg = []), bc = buscar(inv, String(req.producto || '')), pc = bc.p, ms = [];
+      if (!pc) return { resp: { ok: true, res: [{ ok: false, msg: bc.amb ? 'Hay varios productos parecidos a "' + req.producto + '": ' + bc.amb.join(', ') + '.' : 'No encontré "' + req.producto + '" en el inventario.' }], inv: inv }, movs: [], cambio: false };
+      var e = cfgDe(cf, pc.producto);
+      if (!e) { e = { producto: pc.producto, min: 0, nv: false }; cf.push(e); }
+      e.producto = pc.producto;
+      if (req.min !== undefined) {
+        var qm = Number(req.min);
+        if (req.min === null || !(qm > 0)) { e.min = 0; ms.push(pc.producto + ': listo, ya no aviso cuando quede poco.'); }
+        else {
+          if (UNI[req.unidad] && req.unidad !== pc.unidad && CONV[req.unidad + '>' + pc.unidad]) qm = qm * CONV[req.unidad + '>' + pc.unidad];
+          e.min = red(qm);
+          ms.push(pc.producto + ': te aviso cuando ' + (e.min === 1 ? 'quede ' : 'queden ') + cantTxt(e.min, pc.unidad) + ' o menos.' +
+            (pc.total <= e.min ? '\nAhora hay ' + cantTxt(pc.total, pc.unidad) + ', así que ya está en la lista de compras.' : ''));
+        }
+      }
+      if (req.nv !== undefined) {
+        e.nv = !!req.nv;
+        ms.push(pc.producto + (e.nv ? ': anotado, nunca vence. No vuelvo a preguntar la fecha.' : ': listo, vuelvo a preguntar la fecha de vencimiento cuando lo agregues.'));
+      }
+      cf.sort(function (a, b) { return sa(a.producto.toLowerCase()) < sa(b.producto.toLowerCase()) ? -1 : 1; });
+      return { resp: { ok: true, res: ms.map(function (t) { return { ok: true, msg: t }; }), inv: inv }, movs: [], cambio: false, cfgCambio: ms.length > 0 };
+    }
     return { resp: { ok: true, inv: inv }, movs: [], cambio: false };
   }
 
-  return { entender: entender, preparar: preparar, procesar: procesar, productos: productos, buscar: buscar, parecidos: parecidos, resumen: resumen, loteTxt: loteTxt,
+  return { entender: entender, preparar: preparar, procesar: procesar, productos: productos, buscar: buscar, parecidos: parecidos, cfgDe: cfgDe, faltantes: faltantes, resumen: resumen, loteTxt: loteTxt,
     parseFecha: parseFecha, fmtFecha: fmtFecha, aviso: aviso, dias: dias, hoyLocal: hoyLocal,
     clave: clave, cant: cant, cantTxt: cantTxt, fmt: fmt, sinAcentos: sa };
 })();

@@ -55,6 +55,7 @@
   .fila .n span.lote b { font-weight: 600; margin-left: 6px; padding: 1px 7px; border-radius: 9px; font-size: 12px; }
   .fila .n span.lote b.mal { background: var(--rojo-f); color: var(--rojo); }
   .fila .n span.lote b.pronto { background: #fff1cf; color: #7a5200; }
+  .fila .n b.tag { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 1px 8px; border-radius: 9px; font-size: 12px; font-weight: 600; background: #fff1cf; color: #7a5200; }
   .fila .c { text-align: right; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .fila .c span { font-size: 14px; font-weight: 400; color: var(--gris); margin-left: 4px; }
   .fila.cero { background: var(--rojo-f); }
@@ -85,6 +86,7 @@
   #hoja button.pri, #hoja button.sec, #hoja button.ret { border: 0; border-radius: 14px; padding: 15px 12px; font-size: 18px; font-weight: 600; width: 100%; }
   #hoja button.pri { background: var(--verde); color: #fff; }
   #hoja button.sec { background: #e6ece7; color: var(--texto); }
+  #hoja button.chico { font-size: 16px; padding: 12px; font-weight: 500; }
   #hoja button.ret { background: #f3ddd8; color: #7d2a1d; }
   #hoja button:disabled { opacity: .4; }
   #hoja .dos { display: flex; gap: 10px; }
@@ -184,6 +186,7 @@
   var quien = leer('inv.quien', '');
   var chat = leer('inv.chat', []);
   var inv = leer('inv.cache', []);
+  var cfg = leer('inv.cfg', []);      // ajustes por producto: mínimo para avisar y "nunca vence"
   var planilla = leer('inv.planilla', '');
   var ocupado = false;
 
@@ -191,10 +194,12 @@
   function api(req) {
     if (!API) {
       var est = leer('inv.local', { inv: [], ultimos: [] });
+      est.cfg = est.cfg || [];
       est.ahora = new Date().toISOString(); est.hoy = Core.hoyLocal();
       var r = Core.procesar(est, req);
       if (r.movs.length) est.ultimos = r.movs;
-      guardar('inv.local', { inv: est.inv, ultimos: est.ultimos });
+      r.resp.cfg = est.cfg;
+      guardar('inv.local', { inv: est.inv, ultimos: est.ultimos, cfg: est.cfg });
       return Promise.resolve(JSON.parse(JSON.stringify(r.resp)));
     }
     return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(req) })
@@ -202,7 +207,9 @@
       .then(function (d) { if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta inválida'); return d; });
   }
   function recibir(d) {
-    if (d.inv) { inv = d.inv; guardar('inv.cache', inv); pintarInv(); }
+    if (d.cfg) { cfg = d.cfg; guardar('inv.cfg', cfg); }
+    if (d.inv) { inv = d.inv; guardar('inv.cache', inv); }
+    if (d.inv || d.cfg) pintarInv();
     if (d.planilla) { planilla = d.planilla; guardar('inv.planilla', planilla); pintarInv(); }
     return d;
   }
@@ -239,7 +246,7 @@
 
   var AYUDA = 'Escribime como en un chat. Por ejemplo:\n\n' +
     '• Compré 2 kg de arroz y 3 latas de atún\n• Compré 2 puré de tomate que vencen 15/03/2027\n• Saqué 1 leche\n• Se terminó el aceite\n• Hay 12 huevos  (para corregir la cantidad)\n' +
-    '• ¿Cuánto arroz hay?\n• ¿Qué vence?\n• ¿Qué falta?\n• Deshacer  (si te equivocaste)\n• Borrar arroz  (lo quita de la lista)\n\n' +
+    '• ¿Cuánto arroz hay?\n• ¿Qué vence?\n• ¿Qué falta?  (lo que se terminó y lo que queda poco)\n• Mínimo de azúcar 10 kg  (para que avise cuando quede poco)\n• La sal nunca vence  (no pregunta más la fecha)\n• Deshacer  (si te equivocaste)\n• Borrar arroz  (lo quita de la lista)\n\n' +
     'También podés ir a la pestaña Inventario y tocar un producto para agregar o retirar sin escribir.\n\n' +
     'Cuando agregás algo te pregunto si tiene fecha de vencimiento. Cuando sacás algo que tiene varias fechas, te pregunto cuál sacaste y te aviso si queda otro que vence antes.\n\nEn la pestaña Inventario ves todo lo que hay.';
 
@@ -271,17 +278,29 @@
     pend = null;
     var x = cola[0];
     if (!x) return;
-    var p = Core.preparar(inv, x.it);
+    var p = Core.preparar(inv, x.it, cfg);
     if (p.pregunta === 'cual' || p.pregunta === 'parecido') return preguntarProducto(x, p);
     if (p.pregunta === 'venc') return preguntarVenc(x);
     if (p.pregunta === 'lote') return preguntarLote(x, p);
     enviarItem(x);
   }
+  /* Si después del cambio el producto quedó en su mínimo o por debajo, lo avisa. */
+  function avisoPoco(nombre) {
+    var p = Core.buscar(inv, nombre).p, c = p && Core.cfgDe(cfg, p.producto);
+    if (!p || p.total === 0 || !c || !(c.min > 0) || p.total > c.min) return '';
+    return 'Queda poco de ' + p.producto + ': ' + Core.cantTxt(p.total, p.unidad) + ' (aviso en ' + Core.cantTxt(c.min, p.unidad) + '). Ya está en la lista de compras.';
+  }
   function enviarItem(x) {
     if (cola[0] !== x || ocupado) return;
-    mandar({ a: 'mov', quien: quien, texto: x.texto, items: [x.it], id: x.id }).then(function (d) {
+    var it = x.it;
+    var req = it.tipo === 'cfg' ? { a: 'cfg', quien: quien, producto: it.producto, min: it.min, unidad: it.unidad, nv: it.nv }
+      : { a: 'mov', quien: quien, texto: x.texto, items: [it], id: x.id };
+    mandar(req).then(function (d) {
       if (!d) return falla(function () { enviarItem(x); });
-      cola.shift(); seguir();
+      var bien = d.res && d.res[0] && d.res[0].ok, sigue = function () { cola.shift(); seguir(); };
+      if (bien && (it.tipo === 'salida' || it.tipo === 'ajuste')) { var a = avisoPoco(it.producto); if (a) bot(a); }
+      if (bien && x.nunca) return mandar({ a: 'cfg', quien: quien, producto: it.producto, nv: true }).then(sigue);
+      sigue();
     });
   }
   function responder(venc, eco) {
@@ -331,9 +350,11 @@
       var ok = boton('Guardar fecha'); ok.disabled = true;
       f.oninput = function () { ok.disabled = !f.value; };
       ok.onclick = function () { if (f.value) responder(f.value, 'Vence ' + Core.fmtFecha(f.value)); };
-      var no = boton('No tiene vencimiento', true);
-      no.onclick = function () { responder('', 'No tiene vencimiento'); };
-      c.appendChild(f); c.appendChild(ok); c.appendChild(no);
+      var no = boton('Esta vez no tiene', true);
+      no.onclick = function () { responder('', 'Esta vez no tiene vencimiento'); };
+      var nunca = boton('Nunca vence (no preguntar más)', true);
+      nunca.onclick = function () { x.nunca = true; responder('', 'Nunca vence'); };
+      c.appendChild(f); c.appendChild(ok); c.appendChild(no); c.appendChild(nunca);
     } });
   }
   function preguntarLote(x, p) {
@@ -367,6 +388,7 @@
       decir('yo', t);
       return bot('No supe cuál elegir. Tocá uno de los botones de arriba, o escribí "cancelar".');
     }
+    if (pend.tipo === 'venc' && /^(nunca|no vence nunca)\b/.test(n) && cola[0]) { cola[0].nunca = true; return responder('', t); }
     var sin = /^(no|sin|ninguna|ninguno)\b/.test(n);
     var f = sin ? '' : Core.parseFecha(n.replace(/^(si\s+)?((el|la|los|las)\s+)?(que\s+)?((vencen?|vto|vencimiento)\s+)?/, ''), Core.hoyLocal());
     if (pend.tipo === 'lote' && f !== null) {
@@ -377,7 +399,7 @@
     if (f === null) {
       decir('yo', t);
       return bot(pend.tipo === 'lote' ? 'No encontré esa opción. Tocá uno de los botones de arriba, o escribí "cancelar".'
-        : 'No entendí la fecha. Escribila como 15/03/2027, tocá "No tiene vencimiento", o escribí "cancelar".');
+        : 'No entendí la fecha. Escribila como 15/03/2027, tocá "Esta vez no tiene", o escribí "cancelar".');
     }
     responder(f, t);
   }
@@ -413,8 +435,13 @@
           return bot(pre + Core.resumen(b.p, hoy));
         }
         if (e.tipo === 'faltantes') {
-          var f = ps.filter(function (p) { return p.total === 0; });
-          return bot(pre + (f.length ? 'Se terminó y hay que comprar:\n' + f.map(function (p) { return '• ' + p.producto; }).join('\n') : 'No falta nada: todo lo anotado tiene stock.'));
+          var fa = Core.faltantes(inv, cfg), partes = [];
+          if (fa.sin.length) partes.push('Se terminó:\n' + fa.sin.map(function (p) { return '• ' + p.producto; }).join('\n'));
+          if (fa.poco.length) partes.push('Queda poco:\n' + fa.poco.map(function (x) {
+            return '• ' + x.p.producto + ': ' + Core.cantTxt(x.p.total, x.p.unidad) + ' (aviso en ' + Core.cantTxt(x.min, x.p.unidad) + ')';
+          }).join('\n'));
+          var tip = cfg.some(function (c) { return c.min > 0; }) ? '' : '\n\nPara que también te avise cuando queda poco de algo, tocá el producto en Inventario y elegí "Avisar cuando quede poco".';
+          return bot(pre + (partes.length ? 'Para comprar:\n\n' + partes.join('\n\n') : 'No falta nada por ahora.') + tip);
         }
         if (e.tipo === 'vencen') {
           var v = inv.filter(function (l) { return l.cantidad > 0 && Core.aviso(l.venc, hoy); }).sort(function (a, b) { return a.venc < b.venc ? -1 : 1; });
@@ -425,6 +452,7 @@
         bot(pre + 'Hay ' + ps.length + ' productos:\n' + ps.map(function (p) { return '• ' + Core.resumen(p, hoy); }).join('\n'));
       });
     }
+    if (e.pista === 'minimo') return bot('Decime también la cantidad. Por ejemplo: "mínimo de azúcar 10 kg".');
     bot('No te entendí. Probá con algo como "compré 2 leches" o "saqué 1 kg de arroz". Si querés ver más ejemplos, escribí "ayuda".');
   }
 
@@ -451,9 +479,9 @@
     var q = Core.sinAcentos($('buscar').value.toLowerCase().trim());
     var ver = ps.filter(function (p) { return !q || Core.sinAcentos(p.producto.toLowerCase()).indexOf(q) >= 0; });
     var L = $('lista'); L.textContent = '';
-    var sin = ps.filter(function (p) { return p.total === 0; }).length;
+    var sin = ps.filter(function (p) { return p.total === 0; }).length, pocos = Core.faltantes(inv, cfg).poco.length;
     var pv = inv.filter(function (l) { return l.cantidad > 0 && Core.aviso(l.venc, hoy); }).length;
-    $('resumen').textContent = ps.length ? ps.length + ' productos' + (sin ? ' · ' + sin + ' sin stock' : '') + (pv ? ' · ' + pv + (pv === 1 ? ' vencido o por vencer' : ' vencidos o por vencer') : '') : '';
+    $('resumen').textContent = ps.length ? ps.length + ' productos' + (sin ? ' · ' + sin + ' sin stock' : '') + (pocos ? ' · ' + pocos + ' con poco' : '') + (pv ? ' · ' + pv + (pv === 1 ? ' vencido o por vencer' : ' vencidos o por vencer') : '') : '';
     if (!ver.length) {
       var v = document.createElement('div'); v.id = 'vacio';
       v.textContent = ps.length ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no hay nada anotado. Andá al chat y escribí, por ejemplo: "compré 2 kg de arroz".';
@@ -462,6 +490,8 @@
     ver.forEach(function (p) {
       var f = document.createElement('div'); f.className = 'fila' + (p.total === 0 ? ' cero' : '');
       var n = document.createElement('div'); n.className = 'n'; n.textContent = p.producto;
+      var cp = Core.cfgDe(cfg, p.producto);
+      if (p.total > 0 && cp && cp.min > 0 && p.total <= cp.min) { var tg = document.createElement('b'); tg.className = 'tag'; tg.textContent = 'Queda poco'; n.appendChild(tg); }
       p.lotes.forEach(function (l) {
         if (!(l.cantidad > 0)) return;
         var s = document.createElement('span'); s.className = 'lote';
@@ -517,6 +547,37 @@
     botonH(fila, 'Agregar', 'pri', function () { H.tipo = 'entrada'; pasoCantidad(); });
     var b = botonH(fila, 'Retirar', 'ret', function () { H.tipo = 'salida'; pasoCantidad(); });
     b.disabled = p.total === 0;
+    var cp = Core.cfgDe(cfg, p.producto) || { min: 0, nv: false };
+    var info = document.createElement('p'); info.className = 'det';
+    info.textContent = [cp.min > 0 ? 'Aviso de poca cantidad: ' + Core.cantTxt(cp.min, p.unidad) + ' o menos.' : '', cp.nv ? 'Nunca vence.' : ''].filter(Boolean).join(' ');
+    c.appendChild(info);
+    botonH(c, cp.min > 0 ? 'Cambiar el aviso de poca cantidad' : 'Avisar cuando quede poco', 'sec chico', pasoMinimo);
+    botonH(c, cp.nv ? 'Volver a preguntar el vencimiento' : 'Marcar como "nunca vence"', 'sec chico', function () {
+      mandarHoja([{ a: 'cfg', quien: quien, producto: H.nombre, nv: !cp.nv }], (cp.nv ? 'Sí vence: ' : 'Nunca vence: ') + H.nombre + ' (desde Inventario)');
+    });
+  }
+  function pasoMinimo() {
+    var p = prodH(), u = p.unidad, chica = u === 'g' || u === 'ml', paso = chica ? 50 : (u === 'kg' || u === 'l') ? 0.5 : 1;
+    var cp = Core.cfgDe(cfg, p.producto) || { min: 0 };
+    var c = cuerpoHoja('¿Con cuánto querés que te avise que queda poco?');
+    var d = document.createElement('p'); d.className = 'det';
+    d.textContent = 'Ahora hay ' + Core.cantTxt(p.total, u) + '. Cuando quede esta cantidad o menos, aparece en "¿Qué falta?" y en el mail de los lunes.';
+    c.appendChild(d);
+    var fila = document.createElement('div'); fila.className = 'cant'; c.appendChild(fila);
+    var inp = document.createElement('input'); inp.type = 'text'; inp.inputMode = 'decimal'; inp.setAttribute('aria-label', 'Cantidad mínima');
+    inp.value = Core.fmt(cp.min > 0 ? cp.min : (chica ? 100 : 1));
+    function val() { var v = parseFloat(String(inp.value).replace(',', '.')); return v > 0 ? v : 0; }
+    function mover(x) { inp.value = Core.fmt(Math.max(paso, Math.round((val() + x) * 1000) / 1000)); ok.disabled = !val(); }
+    var menos = boton('−'); menos.onclick = function () { mover(-paso); };
+    var mas = boton('+'); mas.onclick = function () { mover(paso); };
+    var uni = document.createElement('span'); uni.textContent = Core.cantTxt(2, u).split(' ').slice(1).join(' ');
+    fila.appendChild(menos); fila.appendChild(inp); fila.appendChild(mas); fila.appendChild(uni);
+    var ok = botonH(c, 'Guardar', 'pri', function () {
+      if (val()) mandarHoja([{ a: 'cfg', quien: quien, producto: H.nombre, min: val(), unidad: u }], 'Avisar cuando queden ' + Core.cantTxt(val(), u) + ' · ' + H.nombre + ' (desde Inventario)');
+    });
+    inp.oninput = function () { ok.disabled = !val(); };
+    if (cp.min > 0) botonH(c, 'No avisar más', 'sec', function () { mandarHoja([{ a: 'cfg', quien: quien, producto: H.nombre, min: null }], 'Sin aviso de poca cantidad: ' + H.nombre + ' (desde Inventario)'); });
+    botonH(c, 'Atrás', 'sec', pasoAccion);
   }
   function pasoCantidad() {
     var p = prodH(), u = p.unidad, chica = u === 'g' || u === 'ml', paso = chica ? 50 : (u === 'kg' || u === 'l') ? 0.5 : 1;
@@ -533,7 +594,7 @@
     var aviso = document.createElement('p'); aviso.className = 'det'; c.appendChild(aviso);
     var sig = botonH(c, 'Siguiente', 'pri', function () {
       H.cant = val(); if (!H.cant) return;
-      if (H.tipo === 'entrada') return pasoVenc();
+      if (H.tipo === 'entrada') { var cn = Core.cfgDe(cfg, H.nombre); return cn && cn.nv ? enviarHoja('') : pasoVenc(); }
       var v = prodH().lotes.filter(function (l) { return l.cantidad > 0; });
       if (v.length > 1) return pasoLote(v);
       enviarHoja(undefined);
@@ -553,7 +614,8 @@
     c.appendChild(f);
     var ok = botonH(c, 'Guardar con esta fecha', 'pri', function () { if (f.value) enviarHoja(f.value); });
     ok.disabled = true; f.oninput = function () { ok.disabled = !f.value; };
-    botonH(c, 'No tiene vencimiento', 'sec', function () { enviarHoja(''); });
+    botonH(c, 'Esta vez no tiene', 'sec', function () { enviarHoja(''); });
+    botonH(c, 'Nunca vence (no preguntar más)', 'sec', function () { enviarHoja('', true); });
     botonH(c, 'Atrás', 'sec', pasoCantidad);
   }
   function pasoLote(v) {
@@ -561,25 +623,36 @@
     v.forEach(function (l, i) { botonH(c, etiquetaLote(l, hoy), i ? 'sec' : 'pri', function () { enviarHoja(l.venc || ''); }); });
     botonH(c, 'Atrás', 'sec', pasoCantidad);
   }
-  function enviarHoja(venc) {
+  function enviarHoja(venc, nunca) {
     var p = prodH(), it = { tipo: H.tipo, producto: H.nombre, cantidad: H.cant, unidad: p.unidad };
     if (venc !== undefined) it.venc = venc;
     var texto = (H.tipo === 'entrada' ? 'Agregar ' : 'Retirar ') + Core.cantTxt(H.cant, p.unidad) + ' · ' + H.nombre + ' (desde Inventario)';
-    var req = { a: 'mov', quien: quien, texto: texto, items: [it], id: Date.now() + '-' + Math.random().toString(36).slice(2, 7) };
+    var reqs = [{ a: 'mov', quien: quien, texto: texto, items: [it], id: Date.now() + '-' + Math.random().toString(36).slice(2, 7) }];
+    if (nunca) reqs.push({ a: 'cfg', quien: quien, producto: H.nombre, nv: true });
+    mandarHoja(reqs, texto, H.tipo === 'salida');
+  }
+  /* Manda uno o más pedidos desde la hoja y muestra el resultado ahí mismo (y lo deja anotado en el chat). */
+  function mandarHoja(reqs, texto, conAviso) {
+    var i = 0, res = [];
     (function ir() {
       var c = cuerpoHoja('Guardando…');
       ocupado = true;
-      api(req).then(recibir).catch(function () { return null; }).then(function (d) {
+      (function paso() {
+        if (i >= reqs.length) return Promise.resolve(true);
+        return api(reqs[i]).then(recibir).then(function (d) { res = res.concat(d.res || []); i++; return paso(); });
+      })().catch(function () { return null; }).then(function (ok) {
         ocupado = false;
         if (!H) return;
         c = cuerpoHoja('');
-        if (!d) {
+        if (!ok) {
           var e = document.createElement('p'); e.className = 'res err'; e.textContent = 'No pude guardar el cambio. Revisá la conexión a internet.'; c.appendChild(e);
           botonH(c, 'Reintentar', 'pri', ir); botonH(c, 'Cerrar', 'sec', cerrarHoja);
           return;
         }
+        var a = conAviso && res[0] && res[0].ok ? avisoPoco(H.nombre) : '';
+        if (a) res.push({ ok: true, msg: a });
         decir('yo', texto);
-        (d.res || []).forEach(function (r) {
+        res.forEach(function (r) {
           bot(r.msg, { err: !r.ok });
           var m = document.createElement('p'); m.className = 'res' + (r.ok ? '' : ' err'); m.textContent = r.msg; c.appendChild(m);
         });
