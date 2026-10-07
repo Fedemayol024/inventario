@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6f54">
+<title>Inventario de casa</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { --verde:#1f6f54; --verde-osc:#175641; --fondo:#eef2ee; --mio:#d6f0e2; --bot:#ffffff; --texto:#1b2420; --gris:#66736c; --linea:#d9e0da; --rojo:#b3402f; --rojo-f:#fbe9e5; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 17px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto); background: #cfd8d2; }
+  #app { height: 100%; height: 100dvh; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; background: var(--fondo); }
+  header { background: var(--verde); color: #fff; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 20px; margin: 0; flex: 1; font-weight: 600; }
+  header button { background: rgba(255,255,255,.16); color: #fff; border: 0; border-radius: 18px; padding: 7px 12px; font-size: 14px; }
+  #aviso { background: #fff6d8; color: #5c4a00; font-size: 14px; padding: 7px 16px; border-bottom: 1px solid #ecdf9f; }
+  main { flex: 1; min-height: 0; position: relative; }
+  .vista { position: absolute; inset: 0; display: none; flex-direction: column; }
+  .vista.activa { display: flex; }
+
+  #mensajes { flex: 1; overflow-y: auto; padding: 14px 12px 6px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 86%; padding: 9px 13px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: 0 1px 1px rgba(0,0,0,.07); }
+  .msg.yo { align-self: flex-end; background: var(--mio); border-bottom-right-radius: 5px; }
+  .msg.bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 5px; }
+  .msg.err { background: var(--rojo-f); color: #7d2a1d; }
+  .msg small { display: block; color: var(--gris); font-size: 12px; margin-top: 3px; text-align: right; }
+  .msg .ops { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+  .msg .ops button { flex: 1; border: 0; border-radius: 12px; padding: 11px 10px; font-size: 16px; font-weight: 600; background: var(--verde); color: #fff; }
+  .msg .ops button.sec { background: #e6ece7; color: var(--texto); }
+  .msg .ops.col { flex-direction: column; }
+  .msg .ops.col button { flex: none; width: 100%; }
+  .msg .ops button:disabled { opacity: .45; }
+  .msg .ops input[type=date] { font: inherit; width: 100%; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px; background: #fff; color: var(--texto); min-height: 46px; }
+  #atajos { display: flex; gap: 8px; padding: 6px 12px; overflow-x: auto; scrollbar-width: none; }
+  #atajos::-webkit-scrollbar { display: none; }
+  #atajos button { flex: none; border: 1px solid var(--linea); background: #fff; color: var(--verde-osc); border-radius: 18px; padding: 8px 14px; font-size: 15px; }
+  #barra { display: flex; gap: 8px; padding: 8px 12px 10px; }
+  #texto { flex: 1; min-width: 0; font: inherit; padding: 12px 16px; border: 1px solid var(--linea); border-radius: 24px; background: #fff; outline: none; }
+  #texto:focus { border-color: var(--verde); }
+  #enviar { flex: none; width: 50px; height: 50px; border-radius: 50%; border: 0; background: var(--verde); color: #fff; font-size: 22px; }
+  #enviar:disabled { opacity: .5; }
+
+  #inv-top { padding: 12px 12px 8px; display: flex; gap: 8px; }
+  #buscar { flex: 1; min-width: 0; font: inherit; padding: 11px 14px; border: 1px solid var(--linea); border-radius: 12px; background: #fff; outline: none; }
+  #inv-top button { border: 1px solid var(--linea); background: #fff; border-radius: 12px; padding: 0 14px; font-size: 15px; color: var(--verde-osc); }
+  #resumen { padding: 0 16px 6px; color: var(--gris); font-size: 14px; }
+  #lista { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
+  .fila { background: #fff; border-radius: 12px; padding: 12px 14px; margin-bottom: 7px; display: flex; align-items: center; gap: 10px; }
+  .fila .n { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .fila .n span { display: block; font-weight: 400; font-size: 13px; color: var(--gris); }
+  .fila .n span.lote b { font-weight: 600; margin-left: 6px; padding: 1px 7px; border-radius: 9px; font-size: 12px; }
+  .fila .n span.lote b.mal { background: var(--rojo-f); color: var(--rojo); }
+  .fila .n span.lote b.pronto { background: #fff1cf; color: #7a5200; }
+  .fila .c { text-align: right; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fila .c span { font-size: 14px; font-weight: 400; color: var(--gris); margin-left: 4px; }
+  .fila.cero { background: var(--rojo-f); }
+  .fila.cero .c { color: var(--rojo); font-size: 15px; }
+  #vacio { text-align: center; color: var(--gris); padding: 40px 24px; }
+  #planilla { display: none; margin: 0 12px 10px; text-align: center; padding: 12px; border-radius: 12px; background: #fff; border: 1px solid var(--linea); color: var(--verde-osc); font-weight: 600; text-decoration: none; }
+
+  nav { display: flex; background: #fff; border-top: 1px solid var(--linea); padding-bottom: env(safe-area-inset-bottom); }
+  nav button { flex: 1; border: 0; background: none; padding: 12px 0 11px; font-size: 16px; color: var(--gris); border-top: 3px solid transparent; }
+  nav button.activa { color: var(--verde); font-weight: 700; border-top-color: var(--verde); }
+
+  #quien { position: fixed; inset: 0; background: rgba(20,35,28,.55); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 5; }
+  #quien .caja { background: #fff; border-radius: 18px; padding: 22px; width: 100%; max-width: 380px; }
+  #quien h2 { margin: 0 0 4px; font-size: 21px; }
+  #quien p { margin: 0 0 14px; color: var(--gris); }
+  #quien .nombres { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  #quien .nombres button { flex: 1; border: 1px solid var(--linea); background: var(--fondo); border-radius: 12px; padding: 13px 8px; font-size: 17px; }
+  #quien input { width: 100%; font: inherit; padding: 12px 14px; border: 1px solid var(--linea); border-radius: 12px; margin-bottom: 10px; }
+  #quien .ok { width: 100%; border: 0; border-radius: 12px; padding: 13px; background: var(--verde); color: #fff; font-size: 17px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Inventario de casa</h1>
+    <button id="btn-quien" type="button"></button>
+  </header>
+  <div id="aviso" hidden></div>
+  <main>
+    <section class="vista activa" id="v-chat">
+      <div id="mensajes" aria-live="polite"></div>
+      <div id="atajos">
+        <button type="button" data-t="Compré ">Compré…</button>
+        <button type="button" data-t="Saqué ">Saqué…</button>
+        <button type="button" data-t="¿Cuánto hay de ">¿Cuánto hay de…?</button>
+        <button type="button" data-e="¿Qué vence?">¿Qué vence?</button>
+        <button type="button" data-e="¿Qué falta?">¿Qué falta?</button>
+        <button type="button" data-e="Deshacer">Deshacer</button>
+        <button type="button" data-e="Ayuda">Ayuda</button>
+      </div>
+      <form id="barra" autocomplete="off">
+        <input id="texto" type="text" placeholder="Ej: compré 2 kg de arroz" enterkeyhint="send" autocapitalize="sentences">
+        <button id="enviar" type="submit" aria-label="Enviar">➤</button>
+      </form>
+    </section>
+    <section class="vista" id="v-inv">
+      <div id="inv-top">
+        <input id="buscar" type="search" placeholder="Buscar producto">
+        <button id="refrescar" type="button">Actualizar</button>
+      </div>
+      <div id="resumen"></div>
+      <div id="lista"></div>
+      <a id="planilla" target="_blank" rel="noopener">Abrir la planilla de Google</a>
+    </section>
+  </main>
+  <nav>
+    <button type="button" class="activa" data-v="v-chat">Chat</button>
+    <button type="button" data-v="v-inv">Inventario</button>
+  </nav>
+</div>
+
+<div id="quien">
+  <div class="caja">
+    <h2>¿Quién sos?</h2>
+    <p>Así queda anotado quién hizo cada cambio.</p>
+    <div class="nombres">
+      <button type="button">Mamá</button><button type="button">Papá</button><button type="button">Fede</button>
+    </div>
+    <input id="otro-nombre" type="text" placeholder="Otro nombre" maxlength="20">
+    <button class="ok" type="button">Listo</button>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="core.js"></script>
+<script>
+(function () {
+  'use strict';
+  var API = (window.INVENTARIO_API_URL || '').trim();
+  var $ = function (id) { return document.getElementById(id); };
+  function leer(k, def) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
+  function guardar(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  var quien = leer('inv.quien', '');
+  var chat = leer('inv.chat', []);
+  var inv = leer('inv.cache', []);
+  var planilla = leer('inv.planilla', '');
+  var ocupado = false;
+
+  /* ----- conexión: Google Sheets, o modo de prueba guardando en este dispositivo ----- */
+  function api(req) {
+    if (!API) {
+      var est = leer('inv.local', { inv: [], ultimos: [] });
+      est.ahora = new Date().toISOString(); est.hoy = Core.hoyLocal();
+      var r = Core.procesar(est, req);
+      if (r.movs.length) est.ultimos = r.movs;
+      guardar('inv.local', { inv: est.inv, ultimos: est.ultimos });
+      return Promise.resolve(JSON.parse(JSON.stringify(r.resp)));
+    }
+    return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(req) })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) { if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta inválida'); return d; });
+  }
+  function recibir(d) {
+    if (d.inv) { inv = d.inv; guardar('inv.cache', inv); pintarInv(); }
+    if (d.planilla) { planilla = d.planilla; guardar('inv.planilla', planilla); pintarInv(); }
+    return d;
+  }
+
+  /* ----- chat ----- */
+  function hora(ts) { var d = new Date(ts); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function pintarMsg(m) {
+    var el = document.createElement('div');
+    el.className = 'msg ' + (m.de === 'yo' ? 'yo' : 'bot') + (m.err ? ' err' : '');
+    el.textContent = m.t;
+    if (m.ops) {
+      var ops = document.createElement('div'); ops.className = 'ops';
+      m.ops.forEach(function (o, i) {
+        var b = document.createElement('button'); b.type = 'button'; b.textContent = o.t; if (i) b.className = 'sec';
+        b.onclick = function () { ops.remove(); o.f(); };
+        ops.appendChild(b);
+      });
+      el.appendChild(ops);
+    }
+    if (m.ui) { var cont = document.createElement('div'); m.ui(cont); el.appendChild(cont); }
+    var s = document.createElement('small'); s.textContent = hora(m.ts); el.appendChild(s);
+    $('mensajes').appendChild(el);
+    $('mensajes').scrollTop = $('mensajes').scrollHeight;
+  }
+  function decir(de, t, extra) {
+    var m = { de: de, t: t, ts: Date.now() };
+    if (extra && extra.err) m.err = 1;
+    chat.push(m); if (chat.length > 200) chat = chat.slice(-200);
+    guardar('inv.chat', chat);
+    if (extra && (extra.ops || extra.ui)) m = { de: de, t: t, ts: m.ts, ops: extra.ops, ui: extra.ui };
+    pintarMsg(m);
+  }
+  function bot(t, extra) { decir('bot', t, extra); }
+
+  var AYUDA = 'Escribime como en un chat. Por ejemplo:\n\n' +
+    '• Compré 2 kg de arroz y 3 latas de atún\n• Compré 2 puré de tomate que vencen 15/03/2027\n• Saqué 1 leche\n• Se terminó el aceite\n• Hay 12 huevos  (para corregir la cantidad)\n' +
+    '• ¿Cuánto arroz hay?\n• ¿Qué vence?\n• ¿Qué falta?\n• Deshacer  (si te equivocaste)\n• Borrar arroz  (lo quita de la lista)\n\n' +
+    'Cuando agregás algo te pregunto si tiene fecha de vencimiento. Cuando sacás algo que tiene varias fechas, te pregunto cuál sacaste y te aviso si queda otro que vence antes.\n\nEn la pestaña Inventario ves todo lo que hay.';
+
+  var cola = [], pend = null;   // productos del mensaje que esperan una respuesta (vencimiento / cuál lote)
+
+  function boton(t, sec) { var b = document.createElement('button'); b.type = 'button'; b.textContent = t; if (sec) b.className = 'sec'; return b; }
+
+  function mandar(req) {
+    ocupado = true; $('enviar').disabled = true;
+    return api(req).then(recibir).then(function (d) {
+      (d.res || []).forEach(function (r) { bot(r.msg, { err: !r.ok }); });
+      return d;
+    }).catch(function () { return null; }).then(function (d) { ocupado = false; $('enviar').disabled = false; return d; });
+  }
+  function falla(reintentar) {
+    bot('No pude guardar el cambio. Revisá la conexión a internet y probá de nuevo.', { err: true, ops: [{ t: 'Reintentar', f: reintentar }] });
+  }
+
+  function encolar(items, texto) {
+    var id = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    ocupado = true;
+    return api({ a: 'inv' }).then(recibir).catch(function () {}).then(function () {
+      ocupado = false;
+      items.forEach(function (it) { delete it.implicita; cola.push({ it: it, texto: texto, id: id }); });
+      seguir();
+    });
+  }
+  function seguir() {
+    pend = null;
+    var x = cola[0];
+    if (!x) return;
+    var p = Core.preparar(inv, x.it);
+    if (p.pregunta === 'venc') return preguntarVenc(x);
+    if (p.pregunta === 'lote') return preguntarLote(x, p);
+    enviarItem(x);
+  }
+  function enviarItem(x) {
+    if (cola[0] !== x || ocupado) return;
+    mandar({ a: 'mov', quien: quien, texto: x.texto, items: [x.it], id: x.id }).then(function (d) {
+      if (!d) return falla(function () { enviarItem(x); });
+      cola.shift(); seguir();
+    });
+  }
+  function responder(venc, eco) {
+    var x = cola[0];
+    if (!x || !pend) return;
+    if (pend.el) pend.el.remove();
+    pend = null;
+    decir('yo', eco);
+    x.it.venc = venc;
+    enviarItem(x);
+  }
+
+  function preguntarVenc(x) {
+    pend = { tipo: 'venc' };
+    bot('¿' + x.it.producto + ' tiene fecha de vencimiento?\nElegila acá abajo o escribila (por ejemplo 15/03/2027).', { ui: function (c) {
+      pend.el = c; c.className = 'ops col';
+      var f = document.createElement('input'); f.type = 'date'; f.min = '2020-01-01'; f.max = '2100-12-31'; f.setAttribute('aria-label', 'Fecha de vencimiento');
+      var ok = boton('Guardar fecha'); ok.disabled = true;
+      f.oninput = function () { ok.disabled = !f.value; };
+      ok.onclick = function () { if (f.value) responder(f.value, 'Vence ' + Core.fmtFecha(f.value)); };
+      var no = boton('No tiene vencimiento', true);
+      no.onclick = function () { responder('', 'No tiene vencimiento'); };
+      c.appendChild(f); c.appendChild(ok); c.appendChild(no);
+    } });
+  }
+  function preguntarLote(x, p) {
+    pend = { tipo: 'lote', opciones: p.opciones };
+    var hoy = Core.hoyLocal();
+    bot('Hay ' + p.producto + ' con distintos vencimientos. ' + (x.it.tipo === 'salida' ? '¿Cuál sacaste?' : '¿A cuál corresponde esa cantidad?'), { ui: function (c) {
+      pend.el = c; c.className = 'ops col';
+      p.opciones.forEach(function (l, i) {
+        var a = Core.aviso(l.venc, hoy);
+        var b = boton((l.venc ? 'Vence ' + Core.fmtFecha(l.venc) : 'Sin vencimiento') + ' · hay ' + Core.cant(l.cantidad, l.unidad) + (a ? ' · ' + a : ''), i > 0);
+        b.onclick = function () { responder(l.venc || '', l.venc ? 'El que vence ' + Core.fmtFecha(l.venc) : 'El que no tiene vencimiento'); };
+        c.appendChild(b);
+      });
+    } });
+  }
+  /* La persona contestó escribiendo en vez de tocar un botón. */
+  function contestar(t) {
+    var n = Core.sinAcentos(t.toLowerCase()).trim();
+    if (/^(cancelar|cancela|nada|olvidalo|dejalo)\b/.test(n)) {
+      decir('yo', t);
+      if (pend.el) pend.el.remove();
+      pend = null; cola = [];
+      return bot('Listo, no anoté eso.');
+    }
+    var sin = /^(no|sin|ninguna|ninguno)\b/.test(n);
+    var f = sin ? '' : Core.parseFecha(n.replace(/^(si\s+)?((el|la|los|las)\s+)?(que\s+)?((vencen?|vto|vencimiento)\s+)?/, ''), Core.hoyLocal());
+    if (pend.tipo === 'lote' && f !== null) {
+      var ops = pend.opciones, igual = ops.filter(function (l) { return (l.venc || '') === f; });
+      if (!igual.length && f) igual = ops.filter(function (l) { return l.venc && l.venc.slice(5) === f.slice(5); });
+      f = igual.length === 1 ? (igual[0].venc || '') : null;
+    }
+    if (f === null) {
+      decir('yo', t);
+      return bot(pend.tipo === 'lote' ? 'No encontré esa opción. Tocá uno de los botones de arriba, o escribí "cancelar".'
+        : 'No entendí la fecha. Escribila como 15/03/2027, tocá "No tiene vencimiento", o escribí "cancelar".');
+    }
+    responder(f, t);
+  }
+
+  function procesarTexto(t) {
+    var hoy = Core.hoyLocal(), e = Core.entender(t, hoy);
+    if (e.tipo === 'ayuda') return bot(AYUDA);
+    if (e.tipo === 'mov') return encolar(e.items, t);
+    if (e.tipo === 'deshacer') {
+      var req = { a: 'undo', quien: quien, id: Date.now() + '-u' };
+      var ir = function () { mandar(req).then(function (d) { if (!d) falla(ir); }); };
+      return ir();
+    }
+    if (e.tipo === 'duda') {
+      var desc = e.items.map(function (i) { return Core.cant(i.cantidad, i.unidad) + ' ' + i.producto; }).join(', ');
+      var con = function (tipo) { return function () { e.items.forEach(function (i) { i.tipo = tipo; }); encolar(e.items, t); }; };
+      return bot(desc + ': ¿lo compraste o lo sacaste?', { ops: [{ t: 'Lo compré', f: con('entrada') }, { t: 'Lo saqué', f: con('salida') }] });
+    }
+    if (e.tipo === 'consulta' || e.tipo === 'lista' || e.tipo === 'faltantes' || e.tipo === 'vencen') {
+      ocupado = true;
+      return api({ a: 'inv' }).then(recibir).catch(function () { return null; }).then(function (d) {
+        ocupado = false;
+        var pre = d ? '' : '(Sin conexión: te muestro lo último que vi.)\n', ps = Core.productos(inv);
+        if (e.tipo === 'consulta') {
+          var b = Core.buscar(inv, e.producto);
+          if (b.amb) return bot(pre + ps.filter(function (p) { return b.amb.indexOf(p.producto) >= 0; }).map(function (p) { return Core.resumen(p, hoy); }).join('\n'));
+          if (!b.p) return bot(pre + 'No tengo "' + e.producto + '" anotado en el inventario.');
+          return bot(pre + Core.resumen(b.p, hoy));
+        }
+        if (e.tipo === 'faltantes') {
+          var f = ps.filter(function (p) { return p.total === 0; });
+          return bot(pre + (f.length ? 'Se terminó y hay que comprar:\n' + f.map(function (p) { return '• ' + p.producto; }).join('\n') : 'No falta nada: todo lo anotado tiene stock.'));
+        }
+        if (e.tipo === 'vencen') {
+          var v = inv.filter(function (l) { return l.cantidad > 0 && Core.aviso(l.venc, hoy); }).sort(function (a, b) { return a.venc < b.venc ? -1 : 1; });
+          return bot(pre + (v.length ? 'Vencido o por vencer en los próximos 30 días:\n' + v.map(function (l) { return '• ' + l.producto + ': ' + Core.loteTxt(l, hoy); }).join('\n')
+            : 'No hay nada vencido ni por vencer en los próximos 30 días.'));
+        }
+        if (!ps.length) return bot(pre + 'El inventario está vacío todavía.');
+        bot(pre + 'Hay ' + ps.length + ' productos:\n' + ps.map(function (p) { return '• ' + Core.resumen(p, hoy); }).join('\n'));
+      });
+    }
+    bot('No te entendí. Probá con algo como "compré 2 leches" o "saqué 1 kg de arroz". Si querés ver más ejemplos, escribí "ayuda".');
+  }
+
+  $('barra').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var t = $('texto').value.trim();
+    if (!t || ocupado) return;
+    $('texto').value = '';
+    if (pend) return contestar(t);
+    decir('yo', t);
+    procesarTexto(t);
+  });
+  $('atajos').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (!b) return;
+    if (!b.dataset.e) { $('texto').value = b.dataset.t; $('texto').focus(); return; }
+    if (ocupado) return;
+    if (pend) return contestar(b.dataset.e);
+    decir('yo', b.dataset.e); procesarTexto(b.dataset.e);
+  });
+
+  /* ----- inventario ----- */
+  function pintarInv() {
+    var hoy = Core.hoyLocal(), ps = Core.productos(inv);
+    var q = Core.sinAcentos($('buscar').value.toLowerCase().trim());
+    var ver = ps.filter(function (p) { return !q || Core.sinAcentos(p.producto.toLowerCase()).indexOf(q) >= 0; });
+    var L = $('lista'); L.textContent = '';
+    var sin = ps.filter(function (p) { return p.total === 0; }).length;
+    var pv = inv.filter(function (l) { return l.cantidad > 0 && Core.aviso(l.venc, hoy); }).length;
+    $('resumen').textContent = ps.length ? ps.length + ' productos' + (sin ? ' · ' + sin + ' sin stock' : '') + (pv ? ' · ' + pv + (pv === 1 ? ' vencido o por vencer' : ' vencidos o por vencer') : '') : '';
+    if (!ver.length) {
+      var v = document.createElement('div'); v.id = 'vacio';
+      v.textContent = ps.length ? 'Ningún producto coincide con la búsqueda.' : 'Todavía no hay nada anotado. Andá al chat y escribí, por ejemplo: "compré 2 kg de arroz".';
+      L.appendChild(v);
+    }
+    ver.forEach(function (p) {
+      var f = document.createElement('div'); f.className = 'fila' + (p.total === 0 ? ' cero' : '');
+      var n = document.createElement('div'); n.className = 'n'; n.textContent = p.producto;
+      p.lotes.forEach(function (l) {
+        if (!(l.cantidad > 0)) return;
+        var s = document.createElement('span'); s.className = 'lote';
+        if (!l.venc) s.textContent = (p.lotes.length > 1 ? Core.cant(l.cantidad, l.unidad) + ' · ' : '') + 'Sin vencimiento';
+        else {
+          s.textContent = (p.lotes.length > 1 ? Core.cant(l.cantidad, l.unidad) + ' · ' : '') + 'Vence ' + Core.fmtFecha(l.venc);
+          var a = Core.aviso(l.venc, hoy);
+          if (a) { var b = document.createElement('b'); b.className = a === 'vencido' ? 'mal' : 'pronto'; b.textContent = a === 'vencido' ? 'Vencido' : a.replace('vence ', ''); s.appendChild(b); }
+        }
+        n.appendChild(s);
+      });
+      var c = document.createElement('div'); c.className = 'c';
+      if (p.total === 0) c.textContent = 'Sin stock';
+      else { var partes = Core.cantTxt(p.total, p.unidad).split(' '); c.textContent = partes[0]; var u = document.createElement('span'); u.textContent = partes.slice(1).join(' '); c.appendChild(u); }
+      f.appendChild(n); f.appendChild(c); L.appendChild(f);
+    });
+    $('planilla').style.display = planilla ? 'block' : 'none';
+    if (planilla) $('planilla').href = planilla;
+  }
+  function refrescar() { return api({ a: 'inv' }).then(recibir).catch(function () {}); }
+  $('buscar').addEventListener('input', pintarInv);
+  $('refrescar').addEventListener('click', function () { var b = this; b.disabled = true; refrescar().then(function () { b.disabled = false; }); });
+
+  document.querySelector('nav').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (!b) return;
+    document.querySelectorAll('nav button').forEach(function (x) { x.classList.toggle('activa', x === b); });
+    document.querySelectorAll('.vista').forEach(function (x) { x.classList.toggle('activa', x.id === b.dataset.v); });
+    if (b.dataset.v === 'v-inv') refrescar(); else $('mensajes').scrollTop = $('mensajes').scrollHeight;
+  });
+
+  /* ----- quién sos ----- */
+  function pedirQuien() { $('quien').style.display = 'flex'; $('otro-nombre').value = ''; }
+  function fijarQuien(n) {
+    n = String(n || '').trim(); if (!n) return;
+    quien = n; guardar('inv.quien', quien);
+    $('btn-quien').textContent = quien; $('quien').style.display = 'none';
+    if (!chat.length) bot('¡Hola, ' + quien + '! Contame qué compraste o qué sacaste y yo lo anoto.\n\nPor ejemplo: "compré 2 kg de arroz y 3 latas de atún" o "saqué 1 leche".');
+  }
+  $('quien').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button'); if (!b) return;
+    fijarQuien(b.classList.contains('ok') ? $('otro-nombre').value : b.textContent);
+  });
+  $('btn-quien').addEventListener('click', pedirQuien);
+
+  /* ----- inicio ----- */
+  if (!API) { $('aviso').hidden = false; $('aviso').textContent = 'Modo de prueba: los datos se guardan solo en este dispositivo.'; }
+  chat.forEach(pintarMsg);
+  pintarInv();
+  if (quien) $('btn-quien').textContent = quien; else pedirQuien();
+  refrescar();
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refrescar(); });
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
+})();
+</script>
+</body>
+</html>
