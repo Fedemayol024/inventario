@@ -28,7 +28,7 @@ var Core = (function () {
   var CONV = { 'kg>g': 1000, 'g>kg': 0.001, 'l>ml': 1000, 'ml>l': 0.001 };
 
   var ENT = lista('compre compramos compro compraron traje trajimos trajo trajeron agregue agrego agrega agregar agregamos sume sumar suma sumamos guarde guardamos guardar puse pusimos entro entraron entra ingreso ingrese llego llegaron repuse repusimos +');
-  var SAL = lista('saque sacamos saco sacar saca sacaron use usamos uso usar usaron gaste gastamos gasto consumi consumimos consumio retire retiramos retiro retirar comi comimos comio tome tomamos tomo abri abrimos abrio lleve llevamos llevo -');
+  var SAL = lista('saque sacamos saco sacar saca sacaron use usamos uso usar usaron gaste gastamos gasto consumi consumimos consumio retire retiramos retiro retirar comi comimos comio tome tomamos tomo abri abrimos abrio lleve llevamos llevo baje bajamos bajo bajar bajaron -');
   var ARTIC = lista('de del el la los las unos unas otro otra otros otras');
   var LUGAR = lista('almacen alacena despensa deposito heladera freezer cocina garage lavadero baulera mueble casa');
   var TIEMPO = lista('hoy ayer recien anoche');
@@ -301,12 +301,50 @@ var Core = (function () {
   function buscar(inv, nombre) {
     var k = clave(nombre), gs = productos(inv), i, cands = [];
     if (!k) return {};
-    for (i = 0; i < gs.length; i++) if (gs[i].clave === k) return { p: gs[i] };
+    for (i = 0; i < gs.length; i++) if (gs[i].clave === k) return { p: gs[i], exacto: true };
     var kw = k.split(' ');
     gs.forEach(function (g) { var w = g.clave.split(' '); if (kw.every(function (x) { return w.indexOf(x) >= 0; })) cands.push(g); });
     if (cands.length === 1) return { p: cands[0] };
     if (cands.length > 1) return { amb: cands.map(function (g) { return g.producto; }) };
     return {};
+  }
+
+  /* Nombres mal escritos: "lisofor" se parece a "Lysoform". */
+  function fon(w) {
+    return w.replace(/ch/g, 'x').replace(/h/g, '').replace(/y/g, 'i').replace(/ll/g, 'i').replace(/z/g, 's').replace(/c(?=[ei])/g, 's')
+      .replace(/qu/g, 'k').replace(/[cq]/g, 'k').replace(/v/g, 'b').replace(/(.)\1+/g, '$1');
+  }
+  function lev(a, b) {
+    var i, j, prev = [], cur;
+    for (j = 0; j <= b.length; j++) prev[j] = j;
+    for (i = 1; i <= a.length; i++) {
+      cur = [i];
+      for (j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  var RELLENO = lista('de del la el los las con en y a');
+  /* Productos del inventario cuyo nombre se parece al escrito (hasta 3, el más parecido primero). */
+  function formas(nombre) {     // cada palabra, tal cual y en singular, ya "como suena"
+    return sa(String(nombre).toLowerCase()).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(function (w) { return w && !RELLENO[w]; })
+      .map(function (w) { var k = clave(w); return k && k !== w ? [fon(w), fon(k)] : [fon(w)]; });
+  }
+  function parecidos(inv, nombre) {
+    var pal = formas(nombre), out = [];
+    if (!pal.length) return [];
+    productos(inv).forEach(function (g) {
+      var gw = formas(g.producto), tot = 0;
+      var ok = pal.every(function (vs) {
+        var mejor = 99, L = 0;
+        vs.forEach(function (w) { gw.forEach(function (xs) { xs.forEach(function (x) { var d = lev(w, x); if (d < mejor) { mejor = d; L = w.length; } }); }); });
+        if (mejor > (L < 4 ? 0 : L <= 5 ? 1 : 2)) return false;
+        tot += mejor; return true;
+      });
+      if (ok) out.push({ n: g.producto, d: tot + Math.abs(gw.length - pal.length) / 10 });
+    });
+    out.sort(function (a, b) { return a.d - b.d; });
+    return out.slice(0, 3).map(function (x) { return x.n; });
   }
 
   function vivos(p) { return p.lotes.filter(function (l) { return l.cantidad > 0; }); }
@@ -337,13 +375,21 @@ var Core = (function () {
   }
 
   /* Qué hay que preguntarle a la persona antes de guardar:
+     { pregunta: 'cual', opciones: [nombres] } → hay varios productos que coinciden: cuál es
+     { pregunta: 'parecido', opciones: [nombres] } → no existe pero se parece a otro: "¿quisiste decir…?"
      { pregunta: 'venc' }  → si tiene fecha de vencimiento
      { pregunta: 'lote', opciones: [lotes] } → de cuál fecha es el que saca
      {} → nada, se puede guardar */
   function preparar(inv, it) {
+    var b = buscar(inv, it.producto), entra = it.tipo === 'entrada' || (it.tipo === 'ajuste' && it.cantidad > 0);
+    if (!it.nuevo) {
+      if (b.amb) return { pregunta: 'cual', opciones: b.amb, nuevo: entra };
+      if (b.p && !b.exacto && entra) return { pregunta: 'parecido', opciones: [b.p.producto], nuevo: true };
+      if (!b.p) { var sim = parecidos(inv, it.producto); if (sim.length) return { pregunta: 'parecido', opciones: sim, nuevo: entra }; }
+    }
     if (it.tipo === 'entrada') return it.venc === undefined ? { pregunta: 'venc' } : {};
     if (it.tipo !== 'salida' && !(it.tipo === 'ajuste' && it.cantidad > 0)) return {};
-    var p = buscar(inv, it.producto).p, v = p ? vivos(p) : [];
+    var p = it.nuevo && !b.exacto ? null : b.p, v = p ? vivos(p) : [];
     if (it.tipo === 'ajuste' && !v.length) return it.venc === undefined ? { pregunta: 'venc' } : {};
     if (v.length > 1 && (it.venc === undefined || !v.some(function (l) { return (l.venc || '') === it.venc; }))) return { pregunta: 'lote', opciones: v, producto: p.producto };
     if (v.length === 1) delete it.venc;
@@ -351,7 +397,9 @@ var Core = (function () {
   }
 
   function aplicar(inv, it, ahora, hoy) {
-    var b = buscar(inv, it.producto), movs = [], p = b.p, k, nota = '';
+    var b = buscar(inv, it.producto), movs = [], p, k, nota = '';
+    if (it.nuevo && !b.exacto) b = {};      // la persona confirmó que es un producto distinto
+    p = b.p;
     if (b.amb) return { ok: false, movs: [], msg: 'Hay varios productos parecidos a "' + it.producto + '": ' + b.amb.join(', ') + '. Escribilo con el nombre completo.' };
     function mov(tipo, l, cambio) { movs.push({ tipo: tipo, producto: l.producto, cambio: red(cambio), unidad: l.unidad, venc: l.venc || '' }); l.act = ahora; }
     function fin(msg) { limpiar(inv, k); var t = total(inv, k); movs.forEach(function (m) { m.stock = t; }); return { ok: true, msg: msg + nota, movs: movs }; }
@@ -456,6 +504,7 @@ var Core = (function () {
     if (req.a === 'mov') {
       var res = (req.items || []).slice(0, 30).map(function (it) {
         var limpio = { tipo: it.tipo, producto: mayus(String(it.producto || '').slice(0, 60)), cantidad: Math.abs(Number(it.cantidad)) || 0, unidad: UNI[it.unidad] ? it.unidad : null };
+        if (it.nuevo) limpio.nuevo = true;
         if (typeof it.venc === 'string') limpio.venc = /^\d{4}-\d{2}-\d{2}$/.test(it.venc) ? it.venc : '';
         var r = aplicar(inv, limpio, ahora, hoy);
         r.movs.forEach(function (m) { reg(m, String(req.texto || '').slice(0, 200)); });
@@ -501,7 +550,7 @@ var Core = (function () {
     return { resp: { ok: true, inv: inv }, movs: [], cambio: false };
   }
 
-  return { entender: entender, preparar: preparar, procesar: procesar, productos: productos, buscar: buscar, resumen: resumen, loteTxt: loteTxt,
+  return { entender: entender, preparar: preparar, procesar: procesar, productos: productos, buscar: buscar, parecidos: parecidos, resumen: resumen, loteTxt: loteTxt,
     parseFecha: parseFecha, fmtFecha: fmtFecha, aviso: aviso, dias: dias, hoyLocal: hoyLocal,
     clave: clave, cant: cant, cantTxt: cantTxt, fmt: fmt, sinAcentos: sa };
 })();

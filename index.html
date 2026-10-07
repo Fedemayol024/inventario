@@ -66,6 +66,33 @@
   nav button { flex: 1; border: 0; background: none; padding: 12px 0 11px; font-size: 16px; color: var(--gris); border-top: 3px solid transparent; }
   nav button.activa { color: var(--verde); font-weight: 700; border-top-color: var(--verde); }
 
+  .fila { cursor: pointer; }
+  .fila:active { background: #e3ece6; }
+  .fila .ch { color: #a9b5ad; font-size: 24px; line-height: 1; margin-left: -2px; }
+  #pista { padding: 0 16px 8px; color: var(--gris); font-size: 14px; }
+  #hoja { position: fixed; inset: 0; background: rgba(20,35,28,.55); display: none; align-items: flex-end; justify-content: center; z-index: 4; }
+  #hoja .caja { background: #fff; width: 100%; max-width: 640px; border-radius: 20px 20px 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); max-height: 88dvh; overflow-y: auto; }
+  #hoja .cab { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
+  #hoja h2 { flex: 1; margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+  #hoja-x { border: 0; background: var(--fondo); width: 38px; height: 38px; border-radius: 50%; font-size: 17px; color: var(--gris); flex: none; }
+  #hoja-cuerpo { display: flex; flex-direction: column; gap: 10px; }
+  #hoja p { margin: 0; }
+  #hoja .preg { font-size: 19px; font-weight: 600; }
+  #hoja .det { color: var(--gris); white-space: pre-wrap; }
+  #hoja .det:empty, #hoja .preg:empty { display: none; }
+  #hoja .res { white-space: pre-wrap; background: var(--mio); border-radius: 12px; padding: 12px 14px; }
+  #hoja .res.err { background: var(--rojo-f); color: #7d2a1d; }
+  #hoja button.pri, #hoja button.sec, #hoja button.ret { border: 0; border-radius: 14px; padding: 15px 12px; font-size: 18px; font-weight: 600; width: 100%; }
+  #hoja button.pri { background: var(--verde); color: #fff; }
+  #hoja button.sec { background: #e6ece7; color: var(--texto); }
+  #hoja button.ret { background: #f3ddd8; color: #7d2a1d; }
+  #hoja button:disabled { opacity: .4; }
+  #hoja .dos { display: flex; gap: 10px; }
+  #hoja .cant { display: flex; align-items: center; gap: 10px; }
+  #hoja .cant button { flex: none; width: 58px; height: 58px; border-radius: 50%; border: 0; background: #e6ece7; font-size: 30px; line-height: 1; color: var(--texto); }
+  #hoja .cant input { flex: 1; min-width: 0; font: inherit; font-size: 30px; font-weight: 700; text-align: center; padding: 8px; border: 1px solid var(--linea); border-radius: 14px; }
+  #hoja .cant span { color: var(--gris); min-width: 3.2em; }
+  #hoja input[type=date] { font: inherit; font-size: 18px; width: 100%; padding: 12px; border: 1px solid var(--linea); border-radius: 14px; background: #fff; color: var(--texto); min-height: 52px; }
   #quien { position: fixed; inset: 0; background: rgba(20,35,28,.55); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 5; }
   #quien .caja { background: #fff; border-radius: 18px; padding: 22px; width: 100%; max-width: 380px; }
   #quien h2 { margin: 0 0 4px; font-size: 21px; }
@@ -106,6 +133,7 @@
         <button id="refrescar" type="button">Actualizar</button>
       </div>
       <div id="resumen"></div>
+      <div id="pista">Tocá un producto para agregar o retirar.</div>
       <div id="lista"></div>
       <a id="planilla" target="_blank" rel="noopener">Abrir la planilla de Google</a>
     </section>
@@ -114,6 +142,13 @@
     <button type="button" class="activa" data-v="v-chat">Chat</button>
     <button type="button" data-v="v-inv">Inventario</button>
   </nav>
+</div>
+
+<div id="hoja">
+  <div class="caja" role="dialog" aria-labelledby="hoja-titulo">
+    <div class="cab"><h2 id="hoja-titulo"></h2><button id="hoja-x" type="button" aria-label="Cerrar">✕</button></div>
+    <div id="hoja-cuerpo"></div>
+  </div>
 </div>
 
 <div id="quien">
@@ -205,6 +240,7 @@
   var AYUDA = 'Escribime como en un chat. Por ejemplo:\n\n' +
     '• Compré 2 kg de arroz y 3 latas de atún\n• Compré 2 puré de tomate que vencen 15/03/2027\n• Saqué 1 leche\n• Se terminó el aceite\n• Hay 12 huevos  (para corregir la cantidad)\n' +
     '• ¿Cuánto arroz hay?\n• ¿Qué vence?\n• ¿Qué falta?\n• Deshacer  (si te equivocaste)\n• Borrar arroz  (lo quita de la lista)\n\n' +
+    'También podés ir a la pestaña Inventario y tocar un producto para agregar o retirar sin escribir.\n\n' +
     'Cuando agregás algo te pregunto si tiene fecha de vencimiento. Cuando sacás algo que tiene varias fechas, te pregunto cuál sacaste y te aviso si queda otro que vence antes.\n\nEn la pestaña Inventario ves todo lo que hay.';
 
   var cola = [], pend = null;   // productos del mensaje que esperan una respuesta (vencimiento / cuál lote)
@@ -236,6 +272,7 @@
     var x = cola[0];
     if (!x) return;
     var p = Core.preparar(inv, x.it);
+    if (p.pregunta === 'cual' || p.pregunta === 'parecido') return preguntarProducto(x, p);
     if (p.pregunta === 'venc') return preguntarVenc(x);
     if (p.pregunta === 'lote') return preguntarLote(x, p);
     enviarItem(x);
@@ -255,6 +292,35 @@
     decir('yo', eco);
     x.it.venc = venc;
     enviarItem(x);
+  }
+
+  /* Varios productos coinciden, o el nombre se parece a uno que ya existe. */
+  function elegirProducto(nombre, eco) {
+    var x = cola[0];
+    if (!x || !pend) return;
+    if (pend.el) pend.el.remove();
+    pend = null;
+    decir('yo', eco);
+    if (nombre) x.it.producto = nombre; else x.it.nuevo = true;
+    seguir();
+  }
+  function preguntarProducto(x, p) {
+    var cual = p.pregunta === 'cual', ps = Core.productos(inv);
+    pend = { tipo: 'prod', opciones: p.opciones, nuevo: p.nuevo };
+    var txt = cual ? 'Hay varios productos que coinciden con "' + x.it.producto + '". ¿Cuál es?'
+      : '"' + x.it.producto + '" no está anotado así. ¿Quisiste decir ' + p.opciones.join(' o ') + '?';
+    bot(txt, { ui: function (c) {
+      pend.el = c; c.className = 'ops col';
+      p.opciones.forEach(function (n) {
+        var g = ps.filter(function (q) { return q.producto === n; })[0];
+        var b = boton((cual ? '' : 'Sí, ') + n + (cual && g ? ' · hay ' + Core.cant(g.total, g.unidad) : ''));
+        b.onclick = function () { elegirProducto(n, n); };
+        c.appendChild(b);
+      });
+      var no = boton(p.nuevo ? (cual ? 'Ninguno: es un producto nuevo' : 'No, es un producto nuevo') : (cual ? 'Ninguno de esos' : 'No, es otra cosa'), true);
+      no.onclick = function () { elegirProducto(null, no.textContent); };
+      c.appendChild(no);
+    } });
   }
 
   function preguntarVenc(x) {
@@ -291,6 +357,15 @@
       if (pend.el) pend.el.remove();
       pend = null; cola = [];
       return bot('Listo, no anoté eso.');
+    }
+    if (pend.tipo === 'prod') {
+      var ops = pend.opciones, k = n.replace(/^(si\s+)?((el|la|los|las)\s+)?(de\s+)?/, '').trim();
+      if (/^(si|sip|ese|esa|eso|exacto|correcto)$/.test(n) && ops.length === 1) return elegirProducto(ops[0], t);
+      if (/^(no|ninguno|ninguna|nuevo|es nuevo|otro|otra)\b/.test(n)) return elegirProducto(null, t);
+      var m = k ? ops.filter(function (o) { return Core.sinAcentos(o.toLowerCase()).indexOf(k) >= 0; }) : [];
+      if (m.length === 1) return elegirProducto(m[0], t);
+      decir('yo', t);
+      return bot('No supe cuál elegir. Tocá uno de los botones de arriba, o escribí "cancelar".');
     }
     var sin = /^(no|sin|ninguna|ninguno)\b/.test(n);
     var f = sin ? '' : Core.parseFecha(n.replace(/^(si\s+)?((el|la|los|las)\s+)?(que\s+)?((vencen?|vto|vencimiento)\s+)?/, ''), Core.hoyLocal());
@@ -329,7 +404,12 @@
         if (e.tipo === 'consulta') {
           var b = Core.buscar(inv, e.producto);
           if (b.amb) return bot(pre + ps.filter(function (p) { return b.amb.indexOf(p.producto) >= 0; }).map(function (p) { return Core.resumen(p, hoy); }).join('\n'));
-          if (!b.p) return bot(pre + 'No tengo "' + e.producto + '" anotado en el inventario.');
+          if (!b.p) {
+            var sim = Core.parecidos(inv, e.producto);
+            if (!sim.length) return bot(pre + 'No tengo "' + e.producto + '" anotado en el inventario.');
+            return bot(pre + 'No tengo "' + e.producto + '" anotado. ¿Quisiste decir ' + sim.join(' o ') + '?\n\n' +
+              ps.filter(function (p) { return sim.indexOf(p.producto) >= 0; }).map(function (p) { return Core.resumen(p, hoy); }).join('\n'));
+          }
           return bot(pre + Core.resumen(b.p, hoy));
         }
         if (e.tipo === 'faltantes') {
@@ -396,11 +476,119 @@
       var c = document.createElement('div'); c.className = 'c';
       if (p.total === 0) c.textContent = 'Sin stock';
       else { var partes = Core.cantTxt(p.total, p.unidad).split(' '); c.textContent = partes[0]; var u = document.createElement('span'); u.textContent = partes.slice(1).join(' '); c.appendChild(u); }
-      f.appendChild(n); f.appendChild(c); L.appendChild(f);
+      f.setAttribute('role', 'button'); f.tabIndex = 0; f.setAttribute('aria-label', p.producto + ': agregar o retirar');
+      f.onclick = function () { abrirHoja(p.producto); };
+      f.onkeydown = function (ev) { if (ev.key === 'Enter') abrirHoja(p.producto); };
+      var ch = document.createElement('div'); ch.className = 'ch'; ch.textContent = '›';
+      f.appendChild(n); f.appendChild(c); f.appendChild(ch); L.appendChild(f);
     });
+    $('pista').style.display = ps.length ? '' : 'none';
     $('planilla').style.display = planilla ? 'block' : 'none';
     if (planilla) $('planilla').href = planilla;
   }
+  /* ----- tocar un producto: agregar o retirar paso a paso ----- */
+  var H = null;
+  function prodH() { return Core.buscar(inv, H.nombre).p; }
+  function cerrarHoja() { $('hoja').style.display = 'none'; H = null; }
+  function cuerpoHoja(pregunta) {
+    var c = $('hoja-cuerpo'); c.textContent = '';
+    $('hoja-titulo').textContent = H.nombre;
+    if (pregunta) { var q = document.createElement('p'); q.className = 'preg'; q.textContent = pregunta; c.appendChild(q); }
+    return c;
+  }
+  function botonH(c, t, clase, f) { var b = boton(t); b.className = clase || ''; b.onclick = f; c.appendChild(b); return b; }
+  function etiquetaLote(l, hoy) {
+    var a = Core.aviso(l.venc, hoy);
+    return (l.venc ? 'Vence ' + Core.fmtFecha(l.venc) : 'Sin vencimiento') + ' · hay ' + Core.cant(l.cantidad, l.unidad) + (a ? ' · ' + a : '');
+  }
+  function abrirHoja(nombre) {
+    if (ocupado) return;
+    H = { nombre: nombre };
+    if (!prodH()) { H = null; return; }
+    $('hoja').style.display = 'flex';
+    pasoAccion();
+  }
+  function pasoAccion() {
+    var p = prodH(), hoy = Core.hoyLocal(), c = cuerpoHoja('');
+    var r = document.createElement('p'); r.className = 'det';
+    r.textContent = Core.resumen(p, hoy).replace(p.producto + ': ', p.total === 0 ? 'Ahora ' : 'Hay ');
+    c.appendChild(r);
+    var fila = document.createElement('div'); fila.className = 'dos'; c.appendChild(fila);
+    botonH(fila, 'Agregar', 'pri', function () { H.tipo = 'entrada'; pasoCantidad(); });
+    var b = botonH(fila, 'Retirar', 'ret', function () { H.tipo = 'salida'; pasoCantidad(); });
+    b.disabled = p.total === 0;
+  }
+  function pasoCantidad() {
+    var p = prodH(), u = p.unidad, chica = u === 'g' || u === 'ml', paso = chica ? 50 : (u === 'kg' || u === 'l') ? 0.5 : 1;
+    var c = cuerpoHoja(H.tipo === 'entrada' ? '¿Cuánto agregás?' : '¿Cuánto retirás? (hay ' + Core.cantTxt(p.total, u) + ')');
+    var fila = document.createElement('div'); fila.className = 'cant'; c.appendChild(fila);
+    var inp = document.createElement('input'); inp.type = 'text'; inp.inputMode = 'decimal'; inp.setAttribute('aria-label', 'Cantidad');
+    inp.value = Core.fmt(H.cant || (chica ? 100 : 1));
+    function val() { var v = parseFloat(String(inp.value).replace(',', '.')); return v > 0 ? v : 0; }
+    function mover(d) { var v = Math.max(paso, Math.round((val() + d) * 1000) / 1000); inp.value = Core.fmt(v); revisar(); }
+    var menos = boton('−'); menos.onclick = function () { mover(-paso); };
+    var mas = boton('+'); mas.onclick = function () { mover(paso); };
+    var uni = document.createElement('span'); uni.textContent = Core.cantTxt(2, u).split(' ').slice(1).join(' ');
+    fila.appendChild(menos); fila.appendChild(inp); fila.appendChild(mas); fila.appendChild(uni);
+    var aviso = document.createElement('p'); aviso.className = 'det'; c.appendChild(aviso);
+    var sig = botonH(c, 'Siguiente', 'pri', function () {
+      H.cant = val(); if (!H.cant) return;
+      if (H.tipo === 'entrada') return pasoVenc();
+      var v = prodH().lotes.filter(function (l) { return l.cantidad > 0; });
+      if (v.length > 1) return pasoLote(v);
+      enviarHoja(undefined);
+    });
+    botonH(c, 'Atrás', 'sec', pasoAccion);
+    function revisar() {
+      sig.disabled = !val();
+      aviso.textContent = H.tipo === 'salida' && val() > p.total ? 'Solo hay ' + Core.cantTxt(p.total, u) + ': va a quedar en cero.' : '';
+    }
+    inp.oninput = revisar; revisar();
+  }
+  function pasoVenc() {
+    var p = prodH(), hoy = Core.hoyLocal(), c = cuerpoHoja('¿Tiene fecha de vencimiento?');
+    var fechas = p.lotes.filter(function (l) { return l.cantidad > 0 && l.venc; });
+    fechas.forEach(function (l) { botonH(c, 'Igual a los que ya hay: ' + Core.fmtFecha(l.venc), 'sec', function () { enviarHoja(l.venc); }); });
+    var f = document.createElement('input'); f.type = 'date'; f.min = '2020-01-01'; f.max = '2100-12-31'; f.setAttribute('aria-label', 'Fecha de vencimiento');
+    c.appendChild(f);
+    var ok = botonH(c, 'Guardar con esta fecha', 'pri', function () { if (f.value) enviarHoja(f.value); });
+    ok.disabled = true; f.oninput = function () { ok.disabled = !f.value; };
+    botonH(c, 'No tiene vencimiento', 'sec', function () { enviarHoja(''); });
+    botonH(c, 'Atrás', 'sec', pasoCantidad);
+  }
+  function pasoLote(v) {
+    var hoy = Core.hoyLocal(), c = cuerpoHoja('Hay con distintos vencimientos. ¿Cuál sacaste?');
+    v.forEach(function (l, i) { botonH(c, etiquetaLote(l, hoy), i ? 'sec' : 'pri', function () { enviarHoja(l.venc || ''); }); });
+    botonH(c, 'Atrás', 'sec', pasoCantidad);
+  }
+  function enviarHoja(venc) {
+    var p = prodH(), it = { tipo: H.tipo, producto: H.nombre, cantidad: H.cant, unidad: p.unidad };
+    if (venc !== undefined) it.venc = venc;
+    var texto = (H.tipo === 'entrada' ? 'Agregar ' : 'Retirar ') + Core.cantTxt(H.cant, p.unidad) + ' · ' + H.nombre + ' (desde Inventario)';
+    var req = { a: 'mov', quien: quien, texto: texto, items: [it], id: Date.now() + '-' + Math.random().toString(36).slice(2, 7) };
+    (function ir() {
+      var c = cuerpoHoja('Guardando…');
+      ocupado = true;
+      api(req).then(recibir).catch(function () { return null; }).then(function (d) {
+        ocupado = false;
+        if (!H) return;
+        c = cuerpoHoja('');
+        if (!d) {
+          var e = document.createElement('p'); e.className = 'res err'; e.textContent = 'No pude guardar el cambio. Revisá la conexión a internet.'; c.appendChild(e);
+          botonH(c, 'Reintentar', 'pri', ir); botonH(c, 'Cerrar', 'sec', cerrarHoja);
+          return;
+        }
+        decir('yo', texto);
+        (d.res || []).forEach(function (r) {
+          bot(r.msg, { err: !r.ok });
+          var m = document.createElement('p'); m.className = 'res' + (r.ok ? '' : ' err'); m.textContent = r.msg; c.appendChild(m);
+        });
+        botonH(c, 'Listo', 'pri', cerrarHoja);
+      });
+    })();
+  }
+  $('hoja').addEventListener('click', function (ev) { if (ev.target === this || ev.target.id === 'hoja-x') cerrarHoja(); });
+
   function refrescar() { return api({ a: 'inv' }).then(recibir).catch(function () {}); }
   $('buscar').addEventListener('input', pintarInv);
   $('refrescar').addEventListener('click', function () { var b = this; b.disabled = true; refrescar().then(function () { b.disabled = false; }); });
