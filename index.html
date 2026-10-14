@@ -34,6 +34,10 @@
   .msg .ops.col { flex-direction: column; }
   .msg .ops.col button { flex: none; width: 100%; }
   .msg .ops button:disabled { opacity: .45; }
+  .fecha { width: 100%; }
+  .fecha input { font: inherit; font-size: 24px; font-weight: 600; letter-spacing: 1px; text-align: center; width: 100%; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px; background: #fff; color: var(--texto); }
+  .fecha input:focus { outline: none; border-color: var(--verde); }
+  .fecha .fnota { display: block; text-align: center; color: var(--gris); font-size: 14px; margin-top: 5px; }
   .msg .ops input[type=date] { font: inherit; width: 100%; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px; background: #fff; color: var(--texto); min-height: 46px; }
   #atajos { display: flex; gap: 8px; padding: 6px 12px; overflow-x: auto; scrollbar-width: none; }
   #atajos::-webkit-scrollbar { display: none; }
@@ -86,6 +90,8 @@
   #hoja button.pri, #hoja button.sec, #hoja button.ret { border: 0; border-radius: 14px; padding: 15px 12px; font-size: 18px; font-weight: 600; width: 100%; }
   #hoja button.pri { background: var(--verde); color: #fff; }
   #hoja button.sec { background: #e6ece7; color: var(--texto); }
+  #hoja input.nombre { font: inherit; font-size: 20px; width: 100%; padding: 12px 14px; border: 1px solid var(--linea); border-radius: 14px; }
+  #hoja input.nombre:focus { outline: none; border-color: var(--verde); }
   #hoja button.chico { font-size: 16px; padding: 12px; font-weight: 500; }
   #hoja button.ret { background: #f3ddd8; color: #7d2a1d; }
   #hoja button:disabled { opacity: .4; }
@@ -342,14 +348,39 @@
     } });
   }
 
+  /* Campo de fecha que se completa tecleando solo los números: 21032029 → 21.03.2029 (arranca vacío). */
+  function campoFecha(alCambiar, alEnter) {
+    var caja = document.createElement('div'); caja.className = 'fecha';
+    var f = document.createElement('input'); f.type = 'text'; f.inputMode = 'numeric'; f.autocomplete = 'off';
+    f.placeholder = 'dd.mm.aaaa'; f.setAttribute('aria-label', 'Fecha de vencimiento: día, mes y año, solo números');
+    var nota = document.createElement('span'); nota.className = 'fnota';
+    var antes = '';
+    function valor() { var d = f.value.replace(/\D/g, ''); return d.length === 8 ? Core.parseFecha(d, Core.hoyLocal()) : null; }
+    f.addEventListener('input', function (ev) {
+      var d = f.value.replace(/\D/g, '').slice(0, 8);
+      if (ev.inputType && ev.inputType.indexOf('delete') === 0 && d === antes) d = d.slice(0, -1);   // borró un punto: borra el número de antes
+      antes = d;
+      f.value = d.slice(0, 2) + (d.length > 2 ? '.' + d.slice(2, 4) : '') + (d.length > 4 ? '.' + d.slice(4) : '');
+      var v = valor();
+      nota.textContent = v ? 'Vence el ' + Core.fmtFecha(v) + (v < Core.hoyLocal() ? ' (ojo: esa fecha ya pasó)' : '') : d.length === 8 ? 'Esa fecha no existe, revisala.' : 'Escribí día, mes y año seguidos, por ejemplo 21032029.';
+      alCambiar(v);
+    });
+    f.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); if (valor()) alEnter(valor()); } });
+    nota.textContent = 'Escribí día, mes y año seguidos, por ejemplo 21032029.';
+    caja.appendChild(f); caja.appendChild(nota);
+    caja.valor = valor;
+    setTimeout(function () { try { f.focus(); } catch (e) {} }, 80);
+    return caja;
+  }
+
   function preguntarVenc(x) {
     pend = { tipo: 'venc' };
-    bot('¿' + x.it.producto + ' tiene fecha de vencimiento?\nElegila acá abajo o escribila (por ejemplo 15/03/2027).', { ui: function (c) {
+    bot('¿' + x.it.producto + ' tiene fecha de vencimiento?\nEscribí la fecha con números seguidos (por ejemplo 21032029) o elegí una opción.', { ui: function (c) {
       pend.el = c; c.className = 'ops col';
-      var f = document.createElement('input'); f.type = 'date'; f.min = '2020-01-01'; f.max = '2100-12-31'; f.setAttribute('aria-label', 'Fecha de vencimiento');
+      var guardar = function (v) { if (v) responder(v, 'Vence ' + Core.fmtFecha(v)); };
+      var f = campoFecha(function (v) { ok.disabled = !v; }, guardar);
       var ok = boton('Guardar fecha'); ok.disabled = true;
-      f.oninput = function () { ok.disabled = !f.value; };
-      ok.onclick = function () { if (f.value) responder(f.value, 'Vence ' + Core.fmtFecha(f.value)); };
+      ok.onclick = function () { guardar(f.valor()); };
       var no = boton('Esta vez no tiene', true);
       no.onclick = function () { responder('', 'Esta vez no tiene vencimiento'); };
       var nunca = boton('Nunca vence (no preguntar más)', true);
@@ -555,6 +586,53 @@
     botonH(c, cp.nv ? 'Volver a preguntar el vencimiento' : 'Marcar como "nunca vence"', 'sec chico', function () {
       mandarHoja([{ a: 'cfg', quien: quien, producto: H.nombre, nv: !cp.nv }], (cp.nv ? 'Sí vence: ' : 'Nunca vence: ') + H.nombre + ' (desde Inventario)');
     });
+    botonH(c, 'Cambiar el nombre', 'sec chico', pasoNombre);
+    botonH(c, 'Borrar producto', 'ret chico', pasoBorrar);
+  }
+  function nuevoId() { return Date.now() + '-' + Math.random().toString(36).slice(2, 7); }
+  function pasoNombre() {
+    var p = prodH(), c = cuerpoHoja('¿Cómo querés que se llame?');
+    var inp = document.createElement('input'); inp.type = 'text'; inp.className = 'nombre'; inp.maxLength = 60; inp.value = p.producto;
+    inp.setAttribute('autocapitalize', 'sentences'); inp.setAttribute('aria-label', 'Nombre nuevo');
+    c.appendChild(inp);
+    var ok = botonH(c, 'Guardar', 'pri', function () {
+      var nuevo = inp.value.replace(/\s+/g, ' ').trim();
+      if (!nuevo || nuevo === p.producto) return;
+      var otro = Core.buscar(inv, nuevo);
+      if (otro.p && otro.exacto && Core.clave(otro.p.producto) !== Core.clave(p.producto)) return pasoUnir(otro.p);
+      renombrar(nuevo);
+    });
+    botonH(c, 'Atrás', 'sec', pasoAccion);
+    inp.oninput = function () { var v = inp.value.trim(); ok.disabled = !v || v === p.producto; };
+    inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ok.click(); } };
+    inp.oninput();
+    setTimeout(function () { try { inp.focus(); inp.select(); } catch (e) {} }, 80);
+  }
+  function pasoUnir(otro) {
+    var p = prodH(), c = cuerpoHoja('Ya existe "' + otro.producto + '"');
+    var d = document.createElement('p'); d.className = 'det';
+    d.textContent = '¿Querés unir "' + p.producto + '" con "' + otro.producto + '"? Las cantidades se suman y queda un solo producto: ' + otro.producto + '.';
+    c.appendChild(d);
+    botonH(c, 'Sí, unirlos', 'pri', function () { renombrar(otro.producto); });
+    botonH(c, 'Atrás', 'sec', pasoNombre);
+  }
+  function renombrar(nuevo) {
+    var viejo = H.nombre, texto = 'Cambiar nombre: ' + viejo + ' → ' + nuevo + ' (desde Inventario)';
+    var req = { a: 'renombrar', quien: quien, producto: viejo, nuevo: nuevo, texto: texto, id: nuevoId() };
+    H.nombre = Core.buscar(inv, nuevo).exacto ? Core.buscar(inv, nuevo).p.producto : nuevo;
+    mandarHoja([req], texto);
+  }
+  function pasoBorrar() {
+    var p = prodH(), c = cuerpoHoja('¿Borrar ' + p.producto + '?');
+    var d = document.createElement('p'); d.className = 'det';
+    d.textContent = (p.total > 0 ? 'Se quita del inventario junto con ' + (p.total === 1 ? 'la ' : 'las ') + Core.cantTxt(p.total, p.unidad) + ' que hay anotadas. ' : 'Se quita de la lista. ') +
+      'Si fue un error, escribí "deshacer" en el chat y vuelve.';
+    c.appendChild(d);
+    botonH(c, 'Sí, borrar', 'ret', function () {
+      var texto = 'Borrar ' + p.producto + ' (desde Inventario)';
+      mandarHoja([{ a: 'mov', quien: quien, texto: texto, items: [{ tipo: 'borrar', producto: p.producto, cantidad: 0 }], id: nuevoId() }], texto);
+    });
+    botonH(c, 'Cancelar', 'sec', pasoAccion);
   }
   function pasoMinimo() {
     var p = prodH(), u = p.unidad, chica = u === 'g' || u === 'ml', paso = chica ? 50 : (u === 'kg' || u === 'l') ? 0.5 : 1;
@@ -610,10 +688,10 @@
     var p = prodH(), hoy = Core.hoyLocal(), c = cuerpoHoja('¿Tiene fecha de vencimiento?');
     var fechas = p.lotes.filter(function (l) { return l.cantidad > 0 && l.venc; });
     fechas.forEach(function (l) { botonH(c, 'Igual a los que ya hay: ' + Core.fmtFecha(l.venc), 'sec', function () { enviarHoja(l.venc); }); });
-    var f = document.createElement('input'); f.type = 'date'; f.min = '2020-01-01'; f.max = '2100-12-31'; f.setAttribute('aria-label', 'Fecha de vencimiento');
+    var f = campoFecha(function (v) { ok.disabled = !v; }, function (v) { enviarHoja(v); });
     c.appendChild(f);
-    var ok = botonH(c, 'Guardar con esta fecha', 'pri', function () { if (f.value) enviarHoja(f.value); });
-    ok.disabled = true; f.oninput = function () { ok.disabled = !f.value; };
+    var ok = botonH(c, 'Guardar con esta fecha', 'pri', function () { var v = f.valor(); if (v) enviarHoja(v); });
+    ok.disabled = true;
     botonH(c, 'Esta vez no tiene', 'sec', function () { enviarHoja(''); });
     botonH(c, 'Nunca vence (no preguntar más)', 'sec', function () { enviarHoja('', true); });
     botonH(c, 'Atrás', 'sec', pasoCantidad);

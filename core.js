@@ -81,6 +81,7 @@ var Core = (function () {
     var anio = +hoy.slice(0, 4), m;
     function prox(mes, dia) { var f = iso(anio, mes, dia); if (f && f < hoy) f = iso(anio + 1, mes, dia); return f; }
     if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s))) return iso(m[1], m[2], m[3]);
+    if ((m = /^(\d{2})(\d{2})(\d{4}|\d{2})$/.exec(s))) return iso(m[3], m[2], m[1]);      // 21032029 o 210329
     if ((m = /^(\d{1,2})[\/\-. ](\d{1,2})[\/\-. ](\d{2}|\d{4})$/.exec(s))) return iso(m[3], m[2], m[1]);
     if ((m = /^(\d{1,2})[\/\-. ](\d{4})$/.exec(s))) return iso(m[2], m[1], 0);
     if ((m = /^(\d{1,2})[\/\-.](\d{1,2})$/.exec(s))) {
@@ -575,7 +576,7 @@ var Core = (function () {
         }
         lote.cantidad = red(Math.max(0, lote.cantidad - cambio)); lote.act = ahora;
         if (!tocados[k]) { tocados[k] = { nombre: lote.producto, unidad: lote.unidad, nuevo: false }; orden.push(k); }
-        if (u.tipo !== 'Salida' && cambio > 0 && red(u.stock) === red(cambio)) tocados[k].nuevo = true;   // ese mensaje lo había creado
+        if (u.tipo !== 'Salida' && cambio > 0 && (red(u.stock) === red(cambio) || u.tipo === 'Renombrado')) tocados[k].nuevo = true;   // ese mensaje lo había creado
         reg({ tipo: 'Deshacer', producto: lote.producto, cambio: -cambio, unidad: lote.unidad, venc: venc }, 'deshacer');
       });
       var partes = orden.map(function (k) {
@@ -587,7 +588,54 @@ var Core = (function () {
       });
       ordenar(inv);
       if (!movs.length) return { resp: { ok: true, res: [{ ok: false, msg: 'No hay nada para deshacer.' }], inv: inv }, movs: [], cambio: false };
-      return { resp: { ok: true, res: [{ ok: true, msg: 'Listo, deshice lo último: ' + partes.join(', ') + '.' }], inv: inv }, movs: movs, cambio: true };
+      // si se deshace un cambio de nombre, los ajustes (mínimo, nunca vence) vuelven al nombre anterior
+      var cfgU = false, viejos = {}, nuevos = {};
+      ult.forEach(function (u) { if (u.tipo === 'Renombrado') (Number(u.cambio) < 0 ? viejos : nuevos)[u.producto] = 1; });
+      var lv = Object.keys(viejos), ln = Object.keys(nuevos);
+      if (lv.length === 1 && ln.length === 1 && estado.cfg) {
+        var ce = cfgDe(estado.cfg, ln[0]);
+        if (ce && !cfgDe(estado.cfg, lv[0]) && !inv.some(function (l) { return clave(l.producto) === clave(ln[0]); })) { ce.producto = lv[0]; cfgU = true; }
+      }
+      return { cfgCambio: cfgU, resp: { ok: true, res: [{ ok: true, msg: 'Listo, deshice lo último: ' + partes.join(', ') + '.' }], inv: inv }, movs: movs, cambio: true };
+    }
+    /* Cambiar el nombre de un producto. Si el nombre nuevo ya existe, une los dos. "Deshacer" lo revierte. */
+    if (req.a === 'renombrar') {
+      var cf2 = estado.cfg || (estado.cfg = []), bo = buscar(inv, String(req.producto || '')), src = bo.exacto ? bo.p : null;
+      var nuevo = mayus(String(req.nuevo || '').replace(/\s+/g, ' ').slice(0, 60));
+      var no2 = function (t) { return { resp: { ok: true, res: [{ ok: false, msg: t }], inv: inv }, movs: [], cambio: false }; };
+      if (!src) return no2('No encontré "' + req.producto + '" en el inventario.');
+      if (!clave(nuevo)) return no2('Escribí el nombre nuevo.');
+      var viejo = src.producto, cs = cfgDe(cf2, viejo);
+      if (clave(nuevo) === src.clave) {                       // solo cambian mayúsculas o acentos
+        src.lotes.forEach(function (l) { l.producto = nuevo; l.act = ahora; });
+        if (cs) cs.producto = nuevo;
+        ordenar(inv);
+        return { resp: { ok: true, res: [{ ok: true, msg: 'Listo: "' + viejo + '" ahora se llama "' + nuevo + '".' }], inv: inv }, movs: [], cambio: true, cfgCambio: !!cs };
+      }
+      var bd = buscar(inv, nuevo), dst = bd.exacto ? bd.p : null;
+      var final = dst ? dst.producto : nuevo, kf = clave(final), uf = dst && dst.total > 0 ? dst.unidad : src.unidad;
+      var fac = uf === src.unidad ? 1 : CONV[src.unidad + '>' + uf];
+      if (!fac && src.total > 0) return no2('No puedo unirlos: "' + viejo + '" está en ' + (MEDIDAS[src.unidad] ? src.unidad : plural(src.unidad)) + ' y "' + final + '" en ' + (MEDIDAS[uf] ? uf : plural(uf)) + '.');
+      if (dst && dst.total === 0) dst.lotes.forEach(function (l) { l.unidad = uf; });
+      vivos(src).forEach(function (l) {
+        var q = red(l.cantidad * fac), v = l.venc || '';
+        reg({ tipo: 'Renombrado', producto: viejo, cambio: -l.cantidad, unidad: src.unidad, venc: v, stock: 0 }, 'Nombre nuevo: ' + final);
+        var t = inv.filter(function (x) { return clave(x.producto) === kf && x.cantidad > 0 && (x.venc || '') === v; })[0] ||
+                inv.filter(function (x) { return clave(x.producto) === kf && x.cantidad === 0; })[0];
+        if (!t) { t = { producto: final, cantidad: 0, unidad: uf, venc: v, act: ahora }; inv.push(t); }
+        if (t.cantidad === 0) t.venc = v;
+        t.cantidad = red(t.cantidad + q); t.act = ahora;
+        reg({ tipo: 'Renombrado', producto: final, cambio: q, unidad: uf, venc: v }, 'Antes: ' + viejo);
+      });
+      for (var ir = inv.length - 1; ir >= 0; ir--) if (clave(inv[ir].producto) === src.clave) inv.splice(ir, 1);
+      if (!inv.some(function (x) { return clave(x.producto) === kf; })) inv.push({ producto: final, cantidad: 0, unidad: uf, venc: '', act: ahora });
+      limpiar(inv, kf);
+      var tf = total(inv, kf);
+      movs.forEach(function (mm) { if (clave(mm.producto) === kf) mm.stock = tf; });
+      if (cs) { if (dst && cfgDe(cf2, final)) cf2.splice(cf2.indexOf(cs), 1); else cs.producto = final; }
+      ordenar(inv);
+      return { resp: { ok: true, res: [{ ok: true, msg: dst ? 'Listo: uní "' + viejo + '" con "' + final + '". Ahora hay ' + cantTxt(tf, uf) + '.' : 'Listo: "' + viejo + '" ahora se llama "' + final + '".' }], inv: inv },
+        movs: movs, cambio: true, cfgCambio: !!cs };
     }
     if (req.a === 'cfg') {
       var cf = estado.cfg || (estado.cfg = []), bc = buscar(inv, String(req.producto || '')), pc = bc.p, ms = [];
