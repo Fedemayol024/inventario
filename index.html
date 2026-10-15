@@ -51,6 +51,12 @@
   #inv-top { padding: 12px 12px 8px; display: flex; gap: 8px; }
   #buscar { flex: 1; min-width: 0; font: inherit; padding: 11px 14px; border: 1px solid var(--linea); border-radius: 12px; background: #fff; outline: none; }
   #inv-top button { border: 1px solid var(--linea); background: #fff; border-radius: 12px; padding: 0 14px; font-size: 15px; color: var(--verde-osc); }
+  #cats { display: flex; gap: 8px; padding: 0 12px 10px; overflow-x: auto; scrollbar-width: none; }
+  #cats::-webkit-scrollbar { display: none; }
+  #cats button { flex: none; border: 1px solid var(--linea); background: #fff; color: var(--verde-osc); border-radius: 18px; padding: 8px 14px; font-size: 15px; }
+  #cats button.activa { background: var(--verde); border-color: var(--verde); color: #fff; font-weight: 600; }
+  .grupo { margin: 14px 4px 8px; font-size: 15px; font-weight: 700; color: var(--verde-osc); display: flex; justify-content: space-between; }
+  .grupo span { font-weight: 400; color: var(--gris); }
   #resumen { padding: 0 16px 6px; color: var(--gris); font-size: 14px; }
   #lista { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
   .fila { background: #fff; border-radius: 12px; padding: 12px 14px; margin-bottom: 7px; display: flex; align-items: center; gap: 10px; }
@@ -140,6 +146,7 @@
         <input id="buscar" type="search" placeholder="Buscar producto">
         <button id="refrescar" type="button">Actualizar</button>
       </div>
+      <div id="cats" role="tablist" aria-label="Categorías"></div>
       <div id="resumen"></div>
       <div id="pista">Tocá un producto para agregar o retirar.</div>
       <div id="lista"></div>
@@ -192,7 +199,8 @@
   var quien = leer('inv.quien', '');
   var chat = leer('inv.chat', []);
   var inv = leer('inv.cache', []);
-  var cfg = leer('inv.cfg', []);      // ajustes por producto: mínimo para avisar y "nunca vence"
+  var cfg = leer('inv.cfg', []);
+  var catSel = leer('inv.catsel', 'Todas');      // ajustes por producto: mínimo para avisar y "nunca vence"
   var planilla = leer('inv.planilla', '');
   var ocupado = false;
 
@@ -480,7 +488,10 @@
             : 'No hay nada vencido ni por vencer en los próximos 30 días.'));
         }
         if (!ps.length) return bot(pre + 'El inventario está vacío todavía.');
-        bot(pre + 'Hay ' + ps.length + ' productos:\n' + ps.map(function (p) { return '• ' + Core.resumen(p, hoy); }).join('\n'));
+        bot(pre + 'Hay ' + ps.length + ' productos:' + Core.CATEGORIAS.map(function (k) {
+          var g = ps.filter(function (p) { return Core.categoria(cfg, p.producto) === k; });
+          return g.length ? '\n\n' + k.toUpperCase() + '\n' + g.map(function (p) { return '• ' + Core.resumen(p, hoy); }).join('\n') : '';
+        }).join(''));
       });
     }
     if (e.pista === 'minimo') return bot('Decime también la cantidad. Por ejemplo: "mínimo de azúcar 10 kg".');
@@ -508,8 +519,28 @@
   function pintarInv() {
     var hoy = Core.hoyLocal(), ps = Core.productos(inv);
     var q = Core.sinAcentos($('buscar').value.toLowerCase().trim());
-    var ver = ps.filter(function (p) { return !q || Core.sinAcentos(p.producto.toLowerCase()).indexOf(q) >= 0; });
-    var L = $('lista'); L.textContent = '';
+    var catDe = {}; ps.forEach(function (p) { catDe[p.producto] = Core.categoria(cfg, p.producto); });
+    // botones de categoría (solo las que tienen productos)
+    var cuenta = {}; ps.forEach(function (p) { cuenta[catDe[p.producto]] = (cuenta[catDe[p.producto]] || 0) + 1; });
+    var usadas = Core.CATEGORIAS.filter(function (k) { return cuenta[k]; });
+    if (catSel !== 'Todas' && usadas.indexOf(catSel) < 0) catSel = 'Todas';
+    var CB = $('cats'); CB.textContent = '';
+    CB.style.display = usadas.length > 1 ? '' : 'none';
+    ['Todas'].concat(usadas).forEach(function (k) {
+      var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab');
+      b.textContent = k + (k === 'Todas' ? '' : ' (' + cuenta[k] + ')');
+      b.className = k === catSel ? 'activa' : ''; b.setAttribute('aria-selected', k === catSel ? 'true' : 'false');
+      b.onclick = function () { catSel = k; guardar('inv.catsel', catSel); pintarInv(); };
+      CB.appendChild(b);
+    });
+    var ver = ps.filter(function (p) {
+      return (!q || Core.sinAcentos(p.producto.toLowerCase()).indexOf(q) >= 0) && (catSel === 'Todas' || catDe[p.producto] === catSel);
+    });
+    ver.sort(function (a, b) {
+      var d = Core.CATEGORIAS.indexOf(catDe[a.producto]) - Core.CATEGORIAS.indexOf(catDe[b.producto]);
+      return d || Core.sinAcentos(a.producto.toLowerCase()).localeCompare(Core.sinAcentos(b.producto.toLowerCase()));
+    });
+    var L = $('lista'), grupoActual = null; L.textContent = '';
     var sin = ps.filter(function (p) { return p.total === 0; }).length, pocos = Core.faltantes(inv, cfg).poco.length;
     var pv = inv.filter(function (l) { return l.cantidad > 0 && Core.aviso(l.venc, hoy); }).length;
     $('resumen').textContent = ps.length ? ps.length + ' productos' + (sin ? ' · ' + sin + ' sin stock' : '') + (pocos ? ' · ' + pocos + ' con poco' : '') + (pv ? ' · ' + pv + (pv === 1 ? ' vencido o por vencer' : ' vencidos o por vencer') : '') : '';
@@ -519,6 +550,12 @@
       L.appendChild(v);
     }
     ver.forEach(function (p) {
+      if (catSel === 'Todas' && usadas.length > 1 && catDe[p.producto] !== grupoActual) {
+        grupoActual = catDe[p.producto];
+        var gh = document.createElement('div'); gh.className = 'grupo'; gh.textContent = grupoActual;
+        var gn = document.createElement('span'); gn.textContent = ver.filter(function (x) { return catDe[x.producto] === grupoActual; }).length; gh.appendChild(gn);
+        L.appendChild(gh);
+      }
       var f = document.createElement('div'); f.className = 'fila' + (p.total === 0 ? ' cero' : '');
       var n = document.createElement('div'); n.className = 'n'; n.textContent = p.producto;
       var cp = Core.cfgDe(cfg, p.producto);
@@ -580,14 +617,25 @@
     b.disabled = p.total === 0;
     var cp = Core.cfgDe(cfg, p.producto) || { min: 0, nv: false };
     var info = document.createElement('p'); info.className = 'det';
-    info.textContent = [cp.min > 0 ? 'Aviso de poca cantidad: ' + Core.cantTxt(cp.min, p.unidad) + ' o menos.' : '', cp.nv ? 'Nunca vence.' : ''].filter(Boolean).join(' ');
+    info.textContent = ['Categoría: ' + Core.categoria(cfg, p.producto) + '.', cp.min > 0 ? 'Aviso de poca cantidad: ' + Core.cantTxt(cp.min, p.unidad) + ' o menos.' : '', cp.nv ? 'Nunca vence.' : ''].filter(Boolean).join(' ');
     c.appendChild(info);
     botonH(c, cp.min > 0 ? 'Cambiar el aviso de poca cantidad' : 'Avisar cuando quede poco', 'sec chico', pasoMinimo);
     botonH(c, cp.nv ? 'Volver a preguntar el vencimiento' : 'Marcar como "nunca vence"', 'sec chico', function () {
       mandarHoja([{ a: 'cfg', quien: quien, producto: H.nombre, nv: !cp.nv }], (cp.nv ? 'Sí vence: ' : 'Nunca vence: ') + H.nombre + ' (desde Inventario)');
     });
+    botonH(c, 'Cambiar la categoría', 'sec chico', pasoCategoria);
     botonH(c, 'Cambiar el nombre', 'sec chico', pasoNombre);
     botonH(c, 'Borrar producto', 'ret chico', pasoBorrar);
+  }
+  function pasoCategoria() {
+    var p = prodH(), actual = Core.categoria(cfg, p.producto), c = cuerpoHoja('¿En qué categoría va?');
+    Core.CATEGORIAS.forEach(function (k) {
+      botonH(c, k + (k === actual ? '  ✓' : ''), k === actual ? 'pri' : 'sec', function () {
+        if (k === actual) return pasoAccion();
+        mandarHoja([{ a: 'cfg', quien: quien, producto: H.nombre, cat: k }], 'Categoría ' + k + ' · ' + H.nombre + ' (desde Inventario)');
+      });
+    });
+    botonH(c, 'Atrás', 'sec', pasoAccion);
   }
   function nuevoId() { return Date.now() + '-' + Math.random().toString(36).slice(2, 7); }
   function pasoNombre() {

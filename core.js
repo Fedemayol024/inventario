@@ -402,6 +402,25 @@ var Core = (function () {
      { pregunta: 'lote', opciones: [lotes] } → de cuál fecha es el que saca
      {} → nada, se puede guardar */
   /* Ajustes por producto: cfg = [{ producto, min, nv }]  (min = avisar cuando quede eso o menos; nv = nunca vence) */
+  /* Categorías. Si nadie eligió una para el producto, se adivina por el nombre (la primera regla que coincide). */
+  var CATEGORIAS = ['Comida', 'Bebidas e infusiones', 'Limpieza y hogar', 'Higiene personal', 'Botiquín', 'Otros'];
+  var REGLAS = [
+    ['Limpieza y hogar', /\b(blem|cif|lavandina|detergente|magistral|ala|skip|ariel|downy|comfort|vivere|suavizante|esponjas?|virulanas?|rejillas?|trapos?|secapisos?|poett|pato|canastas?|canastitas?|glade|aromatizantes?|aerosol|raid|insecticidas?|mosquitos?|x5|desinfectantes?|lysoform|musculo|quitamanchas|ayudin|servilletas?|fosforos?|encendedor|pilas?|lamparas?|velas?|limpia\w*|lustra\w*|cera|bolsas? de (residuos?|basura)|papel de cocina|rollo de cocina|perfume de piso|jabon(es)? de pan|jabon (en polvo|liquido para ropa)|cloro|acido|desengrasante)\b/],
+    ['Botiquín', /\b(curitas?|alcohol|gasas?|algodon|vendas?|ibuprofeno|paracetamol|aspirinas?|remedios?|pastillas?|termometro|agua oxigenada|pervinox|antiseptico|aposito|suero)\b/],
+    ['Higiene personal', /\b(desodorantes?|rexona|dove|cremas?|afeitar|maquinitas?|gillette|shampoo|champu|acondicionador|listerine|enjuague|dental|dientes|papel higienico|toallitas?|panuelos?|talco|quitaesmalte|esmalte|perfumes?|colonia|jabon\w*|dettol|hisopos?|protector|panales?|preservativos?|tampones?|maquillaje)\b/],
+    ['Bebidas e infusiones', /\b(jugos?|tang|gaseosas?|coca|sprite|agua|vinos?|cervezas?|soda|mate cocido|te|cafe|yerba|saquitos|infusion\w*|malta)\b/],
+    ['Comida', /\b(arroz|fideos?|spaghetti|tallarines|polenta|lentejas?|garbanzos?|porotos?|arvejas?|harinas?|azucar|sal|aceite|vinagre|salsas?|pure|tomates?|atun|choclo|duraznos?|picadillo|latas?|leche|edulcorante|maiz|pisingallo|galletitas?|galletas?|mermelada|dulce|queso|manteca|yogures?|huevos?|pan|carne|pollo|pescado|verduras?|frutas?|cacao|chocolate|caldos?|condimentos?|oregano|pimienta|mayonesa|ketchup|mostaza|soja|avena|cereal(es)?|miel|conservas?|sardinas?|caballa|premezcla|bizcochuelo|polvo de hornear|levadura|maicena|ravioles|pizza|tapas|empanadas)\b/]
+  ];
+  function adivinarCategoria(nombre) {
+    var t = sa(String(nombre).toLowerCase()).replace(/[^a-z0-9 ]/g, ' ');
+    for (var i = 0; i < REGLAS.length; i++) if (REGLAS[i][1].test(t)) return REGLAS[i][0];
+    return 'Otros';
+  }
+  function categoria(cfg, nombre) {
+    var c = cfgDe(cfg, nombre);
+    return c && CATEGORIAS.indexOf(c.cat) >= 0 ? c.cat : adivinarCategoria(nombre);
+  }
+
   function cfgDe(cfg, nombre) {
     var k = clave(nombre), i;
     for (i = 0; cfg && i < cfg.length; i++) if (clave(cfg[i].producto) === k) return cfg[i];
@@ -641,7 +660,7 @@ var Core = (function () {
       var cf = estado.cfg || (estado.cfg = []), bc = buscar(inv, String(req.producto || '')), pc = bc.p, ms = [];
       if (!pc) return { resp: { ok: true, res: [{ ok: false, msg: bc.amb ? 'Hay varios productos parecidos a "' + req.producto + '": ' + bc.amb.join(', ') + '.' : 'No encontré "' + req.producto + '" en el inventario.' }], inv: inv }, movs: [], cambio: false };
       var e = cfgDe(cf, pc.producto);
-      if (!e) { e = { producto: pc.producto, min: 0, nv: false }; cf.push(e); }
+      if (!e) { e = { producto: pc.producto, min: 0, nv: false, cat: '' }; cf.push(e); }
       e.producto = pc.producto;
       if (req.min !== undefined) {
         var qm = Number(req.min);
@@ -653,6 +672,10 @@ var Core = (function () {
             (pc.total <= e.min ? '\nAhora hay ' + cantTxt(pc.total, pc.unidad) + ', así que ya está en la lista de compras.' : ''));
         }
       }
+      if (req.cat !== undefined && CATEGORIAS.indexOf(req.cat) >= 0) {
+        e.cat = req.cat;
+        ms.push(pc.producto + ': ahora está en ' + req.cat + '.');
+      }
       if (req.nv !== undefined) {
         e.nv = !!req.nv;
         ms.push(pc.producto + (e.nv ? ': anotado, nunca vence. No vuelvo a preguntar la fecha.' : ': listo, vuelvo a preguntar la fecha de vencimiento cuando lo agregues.'));
@@ -663,7 +686,7 @@ var Core = (function () {
     return { resp: { ok: true, inv: inv }, movs: [], cambio: false };
   }
 
-  return { entender: entender, preparar: preparar, procesar: procesar, productos: productos, buscar: buscar, parecidos: parecidos, cfgDe: cfgDe, faltantes: faltantes, resumen: resumen, loteTxt: loteTxt,
+  return { entender: entender, preparar: preparar, procesar: procesar, productos: productos, buscar: buscar, parecidos: parecidos, cfgDe: cfgDe, faltantes: faltantes, CATEGORIAS: CATEGORIAS, categoria: categoria, resumen: resumen, loteTxt: loteTxt,
     parseFecha: parseFecha, fmtFecha: fmtFecha, aviso: aviso, dias: dias, hoyLocal: hoyLocal,
     clave: clave, cant: cant, cantTxt: cantTxt, fmt: fmt, sinAcentos: sa };
 })();
